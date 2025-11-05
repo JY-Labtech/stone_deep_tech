@@ -1,7 +1,7 @@
 # Stone Deep Tech
 
 <div align="center">
-  <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/c/c9/Stone_pagamentos.png/800px-Stone_pagamentos.png" alt="Stone" height="100" />
+  <img src="assets/stone deep tech.png" alt="Stone" height="300" />
 </div>
 
 </br>
