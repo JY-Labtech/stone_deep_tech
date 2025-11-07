@@ -1,0 +1,83 @@
+group = "br.com.jylabtech.stone_deep_tech"
+version = "1.0"
+
+buildscript {
+    ext {
+        localProps = new Properties()
+        fileName = "local.properties"
+        if (project.rootProject.file(fileName).exists()) {
+            localProps.load(new FileInputStream(project.rootProject.file(fileName)))
+        }
+
+        flutterSdk = System.env.FLUTTER_SDK ?: localProps.getProperty("flutter.sdk") ?: ""
+        licenceKey = System.env.LICENCE_KEY ?: localProps.getProperty("licenceKey") ?: ""
+        licenceInternalKey = System.env.LICENCE_INTERNAL_KEY ?: localProps.getProperty("licenceInternalKey") ?: ""
+    }
+
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath("com.android.tools.build:gradle:8.9.1")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.22")
+    }
+}
+
+apply plugin: "com.android.library"
+apply plugin: "kotlin-android"
+
+repositories {
+    google()
+    mavenCentral()
+}
+
+if (!flutterSdk) {
+    throw new GradleException("Flutter SDK não encontrado. Defina FLUTTER_SDK ou flutter.sdk em local.properties.")
+}
+
+def flutterJar = file("${flutterSdk}/bin/cache/artifacts/engine/android-arm64/flutter.jar")
+
+if (!flutterJar.exists()) {
+    throw new GradleException("flutter.jar não encontrado em ${flutterJar}. Execute 'flutter precache --android'.")
+}
+
+android {
+    namespace = "br.com.jylabtech.stone_deep_tech"
+
+    compileSdk = 36
+
+    defaultConfig {
+        minSdk = 24
+
+        buildConfigField "String", "LICENCE_KEY", "\"${licenceKey}\""
+        buildConfigField "String", "LICENCE_INTERNAL_KEY", "\"${licenceInternalKey}\""
+        consumerProguardFiles "consumer-rules.pro"
+    }
+
+    buildFeatures {
+        buildConfig = true
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_11.toString()
+    }
+
+    lint {
+        abortOnError = false
+    }
+}
+
+dependencies {
+    implementation("androidx.security:security-crypto:1.1.0-alpha03")
+    implementation("androidx.core:core-ktx:1.13.1")
+    implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.22")
+    compileOnly(files(flutterJar))
+}
+

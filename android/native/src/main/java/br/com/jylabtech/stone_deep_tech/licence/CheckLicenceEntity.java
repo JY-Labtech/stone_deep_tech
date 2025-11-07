@@ -40,10 +40,8 @@ public class CheckLicenceEntity {
         return licenceInternalKey;
     }
 
-    // Construtor padrão
     public CheckLicenceEntity() {}
 
-    // Getters e Setters
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
 
@@ -113,7 +111,6 @@ public class CheckLicenceEntity {
     public String getDatabaseVersion() { return databaseVersion; }
     public void setDatabaseVersion(String databaseVersion) { this.databaseVersion = databaseVersion; }
 
-    // Construtor a partir de JSON
     public static CheckLicenceEntity fromJson(String jsonStr) {
         try {
             JSONObject json = new JSONObject(jsonStr);
@@ -160,7 +157,6 @@ public class CheckLicenceEntity {
         }
     }
 
-    // Converte de volta para JSON
     public String toJson() {
         try {
             JSONObject json = new JSONObject();

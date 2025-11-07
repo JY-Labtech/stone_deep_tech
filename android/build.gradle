@@ -9,9 +9,6 @@ buildscript {
             localProps.load(new FileInputStream(rootProject.file(fileName)))
         }
 
-        // Licence Keys
-        licenceKey = System.env.LICENCE_KEY ?: localProps.getProperty("licenceKey") ?: ""
-        licenceInternalKey = System.env.LICENCE_INTERNAL_KEY ?: localProps.getProperty("licenceInternalKey") ?: ""
     }
 
     repositories {
@@ -41,7 +38,7 @@ android {
     compileSdk = 36
 
     buildFeatures {
-        buildConfig = true
+        buildConfig = false
     }
 
     compileOptions {
@@ -55,8 +52,6 @@ android {
 
     defaultConfig {
         minSdk = 24
-        buildConfigField "String", "LICENCE_KEY", "\"${licenceKey}\""
-        buildConfigField "String", "LICENCE_INTERNAL_KEY", "\"${licenceInternalKey}\""
     }
 
     testOptions {
@@ -73,6 +68,7 @@ android {
 dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.mockito:mockito-core:5.0.0")
-    // Dependencias para módulo de licença
+    implementation(files("libs/stone_deep_tech-native.jar"))
     implementation("androidx.security:security-crypto:1.1.0-alpha03")
+    implementation("androidx.core:core-ktx:1.13.1")
 }

@@ -4,6 +4,7 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.os.Build;
 import android.provider.Settings;
+import android.util.Log;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -13,15 +14,14 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import android.util.Log;
 
-// Exceções personalizadas
 class LicenceInvalidException extends Exception { LicenceInvalidException(String msg) { super(msg); } }
 class LicenceUnAuthorizedException extends Exception { LicenceUnAuthorizedException(String msg) { super(msg); } }
 class LicenceNotFoundException extends Exception { LicenceNotFoundException(String msg) { super(msg); } }
@@ -39,10 +39,6 @@ public class LicenceProvider {
         this.context = context;
     }
 
-    /**
-     * Faz a requisição POST de forma assíncrona usando ExecutorService.
-     * Bloqueia a chamada atual até completar.
-     */
     public LicenceResult checkLicence(final String urlString, final String licenceKey) throws Exception {
         LicenceResult licenceResult = new LicenceResult();
         licenceResult.setMethod("licence");
@@ -68,13 +64,13 @@ public class LicenceProvider {
                     connection.setDoOutput(true);
 
                     JSONObject body = new JSONObject();
-                   body.put("deviceId", deviceId);
-                   body.put("deviceUid", deviceUid);
-                   body.put("deviceLocalId", deviceLocalId);
-                   body.put("deviceName", deviceName);
+                    body.put("deviceId", deviceId);
+                    body.put("deviceUid", deviceUid);
+                    body.put("deviceLocalId", deviceLocalId);
+                    body.put("deviceName", deviceName);
 
                     OutputStream os = connection.getOutputStream();
-                    os.write(body.toString().getBytes("UTF-8"));
+                    os.write(body.toString().getBytes(StandardCharsets.UTF_8));
                     os.flush();
                     os.close();
 
@@ -112,7 +108,7 @@ public class LicenceProvider {
 
         Future<LicenceResult> future = executor.submit(task);
         try {
-            return future.get(); // aguarda a execução completa
+            return future.get();
         } catch (ExecutionException e) {
             licenceResult.setResult(999999);
             licenceResult.setErrorMessage(e.getMessage());
@@ -122,7 +118,6 @@ public class LicenceProvider {
 
     private String handleErrors(HttpURLConnection connection) throws Exception {
         String errorMessage = "Erro interno";
-        int statusCode = connection.getResponseCode();
         BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getErrorStream()));
         StringBuilder responseStr = new StringBuilder();
         String line;
@@ -131,14 +126,12 @@ public class LicenceProvider {
         }
         reader.close();
 
-        String message = null;
         try {
             JSONObject json = new JSONObject(responseStr.toString());
-            message = json.optString("message", null);
-            errorMessage = message;
+            errorMessage = json.optString("message", errorMessage);
         } catch (JSONException e) {
+            Log.d("LicenceProvider", "Erro ao parsear resposta de erro", e);
             errorMessage = e.getMessage();
-            Log.d("print", "*ExceptionMessageError: " + e.getMessage());
         }
 
         return errorMessage;

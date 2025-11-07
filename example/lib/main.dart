@@ -2,6 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:stone_deep_tech/stone_deep_tech.dart';
 
+const String _envLicenceKey = '';
+
+const String _envLicenceInternalKey =
+    'aHR0cHM6Ly9wb3MtcGF5bWVudHMtYXBpLTU3NzQ2NDIzNTQwOC5zb3V0aGFtZXJpY2EtZWFzdDEucnVuLmFwcC9wb3MtcGF5bWVudHMvbGljZW5jZS9jaGVjay9pbnZvaWNl';
+
 void main() {
   runApp(const MyApp());
 }
@@ -119,7 +124,17 @@ class _DeeplinkPageState extends State<DeeplinkPage> {
 
   void _initializeDeeplink() {
     try {
-      StoneDeepTech.I.initDeeplink(handler: _deepLinkHandler);
+      if (_envLicenceKey.isEmpty) {
+        throw Exception(
+          'Defina as chaves de licença via --dart-define STONE_DEEP_TECH_LICENCE_KEY e STONE_DEEP_TECH_LICENCE_INTERNAL_KEY.',
+        );
+      }
+
+      StoneDeepTech.I.initDeeplink(
+        handler: _deepLinkHandler,
+        licenceKey: _envLicenceKey,
+        licenceInternalKey: _envLicenceInternalKey,
+      );
       setState(() {
         _isInitialized = true;
         _statusMessage = '✓ Plugin inicializado com sucesso!';

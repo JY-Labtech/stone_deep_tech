@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:stone_deep_tech/src/deeplink/deeplink.dart';
 import 'package:stone_deep_tech/src/interface/handler/ideeplink_handler.dart';
@@ -26,18 +28,34 @@ class StoneDeepTech {
   }
 
   /// Function to initialize deeplink and register the handler
-  Deeplink initDeeplink({required IDeepLinkHandler handler}) {
+  Deeplink initDeeplink({
+    required IDeepLinkHandler handler,
+    required String licenceKey,
+    required String licenceInternalKey,
+  }) {
     if (_deeplink != null) {
+      _deeplink!.setHandler(handler);
+      unawaited(
+        _deeplink!.updateLicence(
+          licenceKey: licenceKey,
+          licenceInternalKey: licenceInternalKey,
+        ),
+      );
       return _deeplink!;
     }
-    _deeplink = Deeplink.create(channel: _channel, handler: handler);
+    _deeplink = Deeplink.create(
+      channel: _channel,
+      handler: handler,
+      licenceKey: licenceKey,
+      licenceInternalKey: licenceInternalKey,
+    );
     return _deeplink!;
   }
 
   /// Get the Deeplink object. Note: It needs to be initialized.
   Deeplink get deeplink {
     if (_deeplink == null) {
-      throw "DEEPLINK NEEDS TO BE INITIALIZED! \n TRY: StoneDeepTech.I.initDeeplink(handler)";
+      throw "DEEPLINK NEEDS TO BE INITIALIZED! \n TRY: StoneDeepTech.I.initDeeplink(handler: ..., licenceKey: '...', licenceInternalKey: '...')";
     }
     return _deeplink!;
   }

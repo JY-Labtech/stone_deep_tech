@@ -1,5 +1,8 @@
 package br.com.jylabtech.stone_deep_tech;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
@@ -17,13 +20,17 @@ import org.junit.Test;
 
 public class StoneDeepTechPluginTest {
   @Test
-  public void onMethodCall_getPlatformVersion_returnsExpectedValue() {
+  public void onMethodCall_withoutNativeBinary_returnsBridgeError() {
     StoneDeepTechPlugin plugin = new StoneDeepTechPlugin();
 
-    final MethodCall call = new MethodCall("getPlatformVersion", null);
+    final MethodCall call = new MethodCall("sendDeeplink", null);
     MethodChannel.Result mockResult = mock(MethodChannel.Result.class);
     plugin.onMethodCall(call, mockResult);
 
-    verify(mockResult).success("Android " + android.os.Build.VERSION.RELEASE);
+    verify(mockResult).error(
+        eq("stone_deep_tech_missing_binary"),
+        contains("Implementação nativa não encontrada"),
+        any()
+    );
   }
 }

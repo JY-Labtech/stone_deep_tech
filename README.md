@@ -18,6 +18,8 @@ Plugin Flutter para integração com o sistema de Deeplinks da Stone para meios 
 
 O **Stone Deep Tech** é um plugin Flutter que permite que desenvolvedores integrem seus aplicativos com o sistema de pagamento da Stone através de deeplinks, sem precisar lidar diretamente com código nativo Android. O plugin oferece uma interface simples e intuitiva para realizar operações de pagamento, cancelamento, impressão customizada e reimpressão de comprovantes.
 
+> A implementação nativa Android é distribuída como um binário privado embarcado no plugin. Nenhum passo adicional de build é necessário para consumidores.
+
 ## ✨ Funcionalidades
 
 - ✅ **Pagamento**: Envio de deeplinks para processamento de pagamentos
@@ -93,25 +95,25 @@ Substitua `seu_app_scheme` pelo scheme único do seu aplicativo (ex: `meuapp`, `
 
 ### 3. Configurar as Chaves de Licença
 
-O plugin requer chaves de licença para funcionar. Configure-as de uma das seguintes formas:
+As chaves de licença agora são enviadas pelo código Dart ao inicializar o plugin:
 
-#### Opção A: Variáveis de Ambiente
+```dart
+StoneDeepTech.I.initDeeplink(
+  handler: handler,
+  licenceKey: const String.fromEnvironment('STONE_DEEP_TECH_LICENCE_KEY'),
+  licenceInternalKey: const String.fromEnvironment('STONE_DEEP_TECH_LICENCE_INTERNAL_KEY'),
+);
+```
+
+Sugerimos definir as chaves com `--dart-define` (ou outro mecanismo seguro) ao executar seu app:
 
 ```bash
-export LICENCE_KEY="sua_chave_aqui"
-export LICENCE_INTERNAL_KEY="aHR0cHM6Ly9wb3MtcGF5bWVudHMtYXBpLTU3NzQ2NDIzNTQwOC5zb3V0aGFtZXJpY2EtZWFzdDEucnVuLmFwcC9wb3MtcGF5bWVudHMvbGljZW5jZS9jaGVjay9pbnZvaWNl"
+flutter run \
+  --dart-define STONE_DEEP_TECH_LICENCE_KEY="sua_chave_aqui" \
+  --dart-define STONE_DEEP_TECH_LICENCE_INTERNAL_KEY="aHR0cHM6Ly9wb3MtcGF5bWVudHMtYXBpLTU3NzQ2NDIzNTQwOC5zb3V0aGFtZXJpY2EtZWFzdDEucnVuLmFwcC9wb3MtcGF5bWVudHMvbGljZW5jZS9jaGVjay9pbnZvaWNl"
 ```
 
-#### Opção B: Arquivo local.properties
-
-Crie ou edite o arquivo `android/local.properties` na raiz do projeto do plugin:
-
-```properties
-licenceKey=sua_chave_aqui
-licenceInternalKey=aHR0cHM6Ly9wb3MtcGF5bWVudHMtYXBpLTU3NzQ2NDIzNTQwOC5zb3V0aGFtZXJpY2EtZWFzdDEucnVuLmFwcC9wb3MtcGF5bWVudHMvbGljZW5jZS9jaGVjay9pbnZvaWNl
-```
-
-**Importante**: O arquivo `local.properties` geralmente está no `.gitignore` e não deve ser commitado no controle de versão.
+Alternativamente, armazene as chaves em um serviço seguro (ex.: vault, remote config) e só então invoque `initDeeplink`.
 
 ### 4. Validação de Licença
 
@@ -156,7 +158,11 @@ class MyDeepLinkHandler implements IDeepLinkHandler {
 
 // Inicialize o plugin
 final handler = MyDeepLinkHandler();
-StoneDeepTech.I.initDeeplink(handler: handler);
+StoneDeepTech.I.initDeeplink(
+  handler: handler,
+  licenceKey: 'SUA_CHAVE',
+  licenceInternalKey: 'SUA_CHAVE_INTERNA',
+);
 ```
 
 ### 2. Enviar Pagamento
@@ -316,7 +322,7 @@ Classe principal do plugin, singleton.
 #### Métodos
 
 - `static StoneDeepTech get I` - Retorna a instância singleton
-- `Deeplink initDeeplink({required IDeepLinkHandler handler})` - Inicializa o plugin com um handler
+- `Deeplink initDeeplink({required IDeepLinkHandler handler, required String licenceKey, required String licenceInternalKey})` - Inicializa o plugin com um handler e configura as chaves de licença
 
 ### DeeplinkParams
 
@@ -459,7 +465,11 @@ class _PaymentPageState extends State<PaymentPage> implements IDeepLinkHandler {
   @override
   void initState() {
     super.initState();
-    StoneDeepTech.I.initDeeplink(handler: this);
+    StoneDeepTech.I.initDeeplink(
+      handler: this,
+      licenceKey: 'SUA_CHAVE',
+      licenceInternalKey: 'SUA_CHAVE_INTERNA',
+    );
   }
 
   Future<void> processPayment() async {
@@ -548,7 +558,11 @@ class PrintHandler implements IDeepLinkHandler {
 
 void printReceipt() {
   final handler = PrintHandler();
-  StoneDeepTech.I.initDeeplink(handler: handler);
+  StoneDeepTech.I.initDeeplink(
+    handler: handler,
+    licenceKey: 'SUA_CHAVE',
+    licenceInternalKey: 'SUA_CHAVE_INTERNA',
+  );
 
   final content = [
     TextPrintContent(
@@ -584,7 +598,7 @@ try {
 } catch (e) {
   if (e.toString().contains('LICENCE_ERROR')) {
     // Licença inválida ou não configurada
-    print('Configure as chaves de licença no local.properties');
+    print('Configure as chaves de licença antes de chamar initDeeplink (ex.: via --dart-define).');
   }
 }
 ```
@@ -631,7 +645,7 @@ if (printResult == PrintResult.printerOutOfPaper) {
 
 **Solução:**
 
-1. Verifique se as chaves estão configuradas em `local.properties` ou variáveis de ambiente
+1. Verifique se as chaves estão sendo fornecidas ao chamar `StoneDeepTech.I.initDeeplink`
 2. Verifique se as chaves são válidas
 3. Verifique a conexão com a internet (primeira validação)
 4. Verifique os logs para mensagens de erro específicas

@@ -1,6 +1,5 @@
 package br.com.jylabtech.stone_deep_tech.licence;
 
-
 public class LicenceResult {
     private String method;
     private String errorMessage;
@@ -25,14 +24,28 @@ public class LicenceResult {
         this.result = value;
     }
 
-    public void setErrorMessage(String value){ this.errorMessage = value;}
+    public void setErrorMessage(String value) {
+        this.errorMessage = value;
+    }
 
-    public void setMessage(String value){this.message = value;}
+    public void setMessage(String value) {
+        this.message = value;
+    }
 
-    public String getMessage(){return this.message;}
+    public String getMessage() {
+        return this.message;
+    }
 
-    public String getMethod(){return this.method;}
-    public String getErrorMessage(){return this.errorMessage;}
-    public int getResult(){return this.result;}
+    public String getMethod() {
+        return this.method;
+    }
+
+    public String getErrorMessage() {
+        return this.errorMessage;
+    }
+
+    public int getResult() {
+        return this.result;
+    }
 }
 
