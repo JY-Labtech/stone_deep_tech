@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:stone_deep_tech/src/interface/handler/ideeplink_handler.dart';
 import 'package:stone_deep_tech/src/interface/model/deeplink_params.dart';
@@ -22,30 +24,73 @@ final class Deeplink {
   static Deeplink create({
     required MethodChannel channel,
     required IDeepLinkHandler handler,
+    required String licenceKey,
+    required String licenceInternalKey,
   }) {
-    if (_instance != null) {
-      return _instance!;
+    final sanitizedLicenceKey = licenceKey.trim();
+    final sanitizedLicenceInternalKey = licenceInternalKey.trim();
+
+    if (sanitizedLicenceKey.isEmpty || sanitizedLicenceInternalKey.isEmpty) {
+      throw ArgumentError('licenceKey e licenceInternalKey são obrigatórios.');
     }
 
-    final deeplink = Deeplink._(
-      channel: channel,
-      handler: handler,
+    if (_instance == null) {
+      final deeplink = Deeplink._(
+        channel: channel,
+        handler: handler,
+      );
+
+      _instance = deeplink;
+
+      // Set up method call handler for receiving deeplink responses
+      deeplink.channel.setMethodCallHandler((call) async {
+        if (call.method == 'onDeeplinkResponse') {
+          final responseUri = call.arguments as String? ?? '';
+          await deeplink.handler.onDeeplinkResponse(responseUri);
+        } else if (call.method == 'onDeeplinkError') {
+          final error = call.arguments as String? ?? 'Unknown error';
+          await deeplink.handler.onError(error);
+        }
+      });
+    } else {
+      _instance!.handler = handler;
+    }
+
+    unawaited(
+      _instance!._configureLicence(
+        licenceKey: sanitizedLicenceKey,
+        licenceInternalKey: sanitizedLicenceInternalKey,
+      ),
     );
 
-    _instance = deeplink;
+    return _instance!;
+  }
 
-    // Set up method call handler for receiving deeplink responses
-    deeplink.channel.setMethodCallHandler((call) async {
-      if (call.method == 'onDeeplinkResponse') {
-        final responseUri = call.arguments as String? ?? '';
-        await deeplink.handler.onDeeplinkResponse(responseUri);
-      } else if (call.method == 'onDeeplinkError') {
-        final error = call.arguments as String? ?? 'Unknown error';
-        await deeplink.handler.onError(error);
-      }
+  Future<void> _configureLicence({
+    required String licenceKey,
+    required String licenceInternalKey,
+  }) async {
+    await channel.invokeMethod('configureLicence', {
+      'licenceKey': licenceKey,
+      'licenceInternalKey': licenceInternalKey,
     });
+  }
 
-    return deeplink;
+  Future<void> updateLicence({
+    required String licenceKey,
+    required String licenceInternalKey,
+  }) {
+    final sanitizedLicenceKey = licenceKey.trim();
+    final sanitizedLicenceInternalKey = licenceInternalKey.trim();
+
+    if (sanitizedLicenceKey.isEmpty || sanitizedLicenceInternalKey.isEmpty) {
+      throw ArgumentError('licenceKey e licenceInternalKey são obrigatórios.');
+    }
+
+    return _configureLicence(
+      licenceKey: sanitizedLicenceKey,
+      licenceInternalKey: sanitizedLicenceInternalKey,
+    );
   }
 
   /// Send deeplink to Stone payment app
