@@ -54,7 +54,7 @@ detect_java() {
       log "JAVA_HOME atual (${JAVA_HOME}) é inválido. Tentando detectar automaticamente."
       unset JAVA_HOME
     else
-      return
+      return 0
     fi
   fi
 
@@ -72,7 +72,7 @@ detect_android_sdk() {
     return
   fi
 
-  local props_file
+  local props_file=""
   if [[ -f "${ANDROID_DIR}/local.properties" ]]; then
     props_file="${ANDROID_DIR}/local.properties"
   elif [[ -f "${EXAMPLE_ANDROID_DIR}/local.properties" ]]; then
@@ -93,7 +93,7 @@ detect_android_sdk() {
 }
 
 prepare_local_properties() {
-  local template_file
+  local template_file=""
   if [[ -f "${ANDROID_DIR}/local.properties" ]]; then
     template_file="${ANDROID_DIR}/local.properties"
   elif [[ -f "${EXAMPLE_ANDROID_DIR}/local.properties" ]]; then
@@ -117,7 +117,9 @@ build_native_aar() {
 
   log "Compilando módulo native com Gradle wrapper do exemplo"
   pushd "$EXAMPLE_ANDROID_DIR" > /dev/null
-  ./gradlew -p "$NATIVE_DIR" clean assembleRelease
+  # GRADLE_ARGS opcional (ex.: "--no-daemon -Dorg.gradle.jvmargs=-Xmx2g").
+  # shellcheck disable=SC2086
+  ./gradlew ${GRADLE_ARGS:-} -p "$NATIVE_DIR" clean assembleRelease
   popd > /dev/null
 }
 

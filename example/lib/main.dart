@@ -2,10 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:stone_deep_tech/stone_deep_tech.dart';
 
-const String _envLicenceKey = '';
+const String _envLicenceKey =
+    String.fromEnvironment('STONE_DEEP_TECH_LICENCE_KEY');
 
-const String _envLicenceInternalKey =
-    '***REMOVIDO***';
+const String _envLicenceInternalKey = String.fromEnvironment(
+  'STONE_DEEP_TECH_LICENCE_INTERNAL_KEY',
+  defaultValue:
+      '***REMOVIDO***',
+);
 
 void main() {
   runApp(const MyApp());

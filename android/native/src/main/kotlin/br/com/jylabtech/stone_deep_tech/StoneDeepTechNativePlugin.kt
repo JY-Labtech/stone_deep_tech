@@ -2,10 +2,15 @@ package br.com.jylabtech.stone_deep_tech
 
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.annotation.NonNull
+import androidx.annotation.VisibleForTesting
 import br.com.jylabtech.stone_deep_tech.BuildConfig
+import br.com.jylabtech.stone_deep_tech.licence.CheckLicenceTech
+import br.com.jylabtech.stone_deep_tech.licence.LicenceConfig
+import br.com.jylabtech.stone_deep_tech.licence.LicenceResult
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
@@ -13,43 +18,99 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
+import io.flutter.plugin.common.PluginRegistry
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 class StoneDeepTechNativePlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     private val CHANNEL_NAME = "stone_deep_tech"
     private val TAG = "StoneDeepTechNative"
 
-    private lateinit var channel: MethodChannel
+    private var channel: MethodChannel? = null
     private var context: Context? = null
     private var activityBinding: ActivityPluginBinding? = null
-    private var licenceTech: br.com.jylabtech.stone_deep_tech.licence.CheckLicenceTech? = null
+    private var licenceTech: CheckLicenceTech? = null
     private var licenceKey: String? = null
     private var licenceInternalKey: String? = null
 
+    /** Validação da licença (bloqueante; roda em background). Substituível em testes. */
+    @VisibleForTesting
+    internal var licenceValidator: ((String, String) -> LicenceResult?)? = null
+
+    // Uma thread só: validações em sequência reaproveitam o cache salvo pela anterior.
+    // Criada sob demanda e encerrada em onDetachedFromEngine.
+    private var licenceExecutor: ExecutorService? = null
+
+    private fun licenceExecutor(): ExecutorService =
+        licenceExecutor ?: Executors.newSingleThreadExecutor().also { licenceExecutor = it }
+
+    private val mainHandler: Handler by lazy { Handler(Looper.getMainLooper()) }
+
+    /** Executa a validação fora da main thread. Substituível em testes. */
+    @VisibleForTesting
+    internal var backgroundExecutor: (Runnable) -> Unit = { task -> licenceExecutor().execute(task) }
+
+    /** Entrega o resultado na main thread. Substituível em testes. */
+    @VisibleForTesting
+    internal var mainThreadExecutor: (Runnable) -> Unit = { task -> mainHandler.post(task) }
+
+    /** Abre o app da Stone. Substituível em testes. */
+    @VisibleForTesting
+    internal var gateway: StoneGateway = IntentStoneGateway { context }
+
+    /** Envia uma chamada ao Dart (padrão: MethodChannel). Substituível em testes. */
+    @VisibleForTesting
+    internal var responseSender: (String, Any?, Result) -> Unit = { method, arguments, callback ->
+        val currentChannel = channel
+        if (currentChannel == null) callback.notImplemented()
+        else currentChannel.invokeMethod(method, arguments, callback)
+    }
+
+    @VisibleForTesting
+    internal val responseDispatcher = DeeplinkResponseDispatcher { method, arguments, callback ->
+        responseSender(method, arguments, callback)
+    }
+
+    /** Schemes de retorno enviados à Stone (persistido quando há contexto). Substituível em testes. */
+    @VisibleForTesting
+    internal var returnSchemes: ReturnSchemeStore = InMemoryReturnSchemeStore()
+
+    // Só consome (true) intents que são resposta da Stone; os demais seguem para o app.
+    private val newIntentListener = PluginRegistry.NewIntentListener { intent -> handleIntent(intent) }
+
     companion object {
-        private const val AMOUNT = "amount"
-        private const val ORDER_ID = "order_id"
-        private const val EDITABLE_AMOUNT = "editable_amount"
-        private const val TRANSACTION_TYPE = "transaction_type"
-        private const val INSTALLMENT_TYPE = "installment_type"
-        private const val INSTALLMENT_COUNT = "installment_count"
-        private const val RETURN_SCHEME = "return_scheme"
-        private const val ATK = "atk"
-        private const val TYPE_CUSTOMER = "TYPE_CUSTOMER"
+        private const val LICENCE_ERROR_MESSAGE = "Sua licença não foi ativada."
+
+        /** Extra que marca o intent de resposta da Stone já entregue ao Dart. */
+        internal const val EXTRA_HANDLED = "br.com.jylabtech.stone_deep_tech.RESPONSE_HANDLED"
+
+        /** Métodos que executam operações de negócio e exigem licença válida. */
+        internal val GATED_METHODS = setOf("sendDeeplink", "sendCancel", "sendPrint", "sendReprint")
     }
 
     override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
-        channel = MethodChannel(flutterPluginBinding.binaryMessenger, CHANNEL_NAME)
-        channel.setMethodCallHandler(this)
+        channel = MethodChannel(flutterPluginBinding.binaryMessenger, CHANNEL_NAME).also {
+            it.setMethodCallHandler(this)
+        }
         context = flutterPluginBinding.applicationContext
         context?.let {
-            licenceTech = br.com.jylabtech.stone_deep_tech.licence.CheckLicenceTech(it)
+            licenceTech = CheckLicenceTech(it)
+            returnSchemes = SharedPrefsReturnSchemeStore(it)
         }
         initialiseLicenceDefaults()
     }
 
-    override fun onMethodCall(@NonNull call: MethodCall, @NonNull result: Result) {
+    override fun onMethodCall(@NonNull call: MethodCall, @NonNull rawResult: Result) {
+        // Toda resposta passa por SafeResult: no máximo uma resposta por chamada.
+        val result = SafeResult(rawResult, call.method)
+
         if (call.method == "configureLicence") {
             handleConfigureLicence(call, result)
+            return
+        }
+
+        if (call.method !in GATED_METHODS) {
+            result.notImplemented()
             return
         }
 
@@ -57,95 +118,87 @@ class StoneDeepTechNativePlugin : FlutterPlugin, MethodCallHandler, ActivityAwar
             return
         }
 
-        if (!isValidLicence()) {
-            result.error("LICENCE_ERROR", "Sua licença não foi ativada.", null)
-            return
+        // Toda operação valida a licença antes de abrir o app da Stone (cache válido ou servidor).
+        withValidLicence(result) {
+            executeOperation(call, result)
+        }
+    }
+
+    private fun executeOperation(call: MethodCall, result: Result) {
+        try {
+            val request = DeeplinkRequests.fromCall(call)
+            // Registra antes de abrir: a resposta da Stone volta com esse scheme.
+            request.returnScheme?.let { returnSchemes.add(it) }
+            gateway.open(request)
+            result.success(true)
+        } catch (e: Exception) {
+            Log.e(TAG, "Erro ao executar ${call.method}", e)
+            result.error("ERROR", e.message ?: e.javaClass.simpleName, null)
+        }
+    }
+
+    /**
+     * Valida a licença em background e, na main thread, executa [onValid] somente se a licença
+     * for válida e ativa. Caso contrário responde LICENCE_ERROR e não abre o app da Stone.
+     */
+    private fun withValidLicence(result: Result, onValid: () -> Unit) {
+        val configuredLicenceKey = licenceKey?.trim().orEmpty()
+        val configuredLicenceInternalKey = licenceInternalKey?.trim().orEmpty()
+        val validator = licenceValidator ?: licenceTech?.let { tech ->
+            { key: String, internalKey: String -> tech.validateLicence(key, internalKey) }
         }
 
-        when (call.method) {
-            "sendDeeplink" -> {
-                try {
-                    sendDeeplink(
-                        call.argument<Int>("amount"),
-                        call.argument<Boolean>("editableAmount"),
-                        call.argument<String>("transactionType"),
-                        call.argument<Int>("installmentCount"),
-                        call.argument<String>("installmentType"),
-                        call.argument<Int>("orderId"),
-                        call.argument<String>("returnScheme")
-                    )
-                    result.success(true)
+        try {
+            backgroundExecutor(Runnable {
+                val licenceResult: LicenceResult? = try {
+                    validator?.invoke(configuredLicenceKey, configuredLicenceInternalKey)
                 } catch (e: Exception) {
-                    result.error("ERROR", e.message, null)
+                    Log.e(TAG, "Erro ao validar licença", e)
+                    null
                 }
-            }
-            "sendCancel" -> {
-                try {
-                    sendCancel(
-                        call.argument<String>("returnScheme"),
-                        call.argument<String>("atk"),
-                        call.argument<Int>("amount"),
-                        call.argument<Boolean>("editableAmount")
-                    )
-                    result.success(true)
-                } catch (e: Exception) {
-                    result.error("ERROR", e.message, null)
-                }
-            }
-            "sendPrint" -> {
-                try {
-                    sendPrint(
-                        call.argument<String>("schemeReturn"),
-                        call.argument<String>("printableContent"),
-                        call.argument<Boolean>("showFeedbackScreen")
-                    )
-                    result.success(true)
-                } catch (e: Exception) {
-                    result.error("ERROR", e.message, null)
-                }
-            }
-            "sendReprint" -> {
-                try {
-                    sendReprint(
-                        call.argument<String>("schemeReturn"),
-                        call.argument<String>("atk"),
-                        call.argument<String>("typeCustomer"),
-                        call.argument<Boolean>("showFeedbackScreen")
-                    )
-                    result.success(true)
-                } catch (e: Exception) {
-                    result.error("ERROR", e.message, null)
-                }
-            }
-            else -> {
-                result.notImplemented()
-            }
+                val isValid = licenceResult?.result == 0
+
+                mainThreadExecutor(Runnable {
+                    if (isValid) {
+                        onValid()
+                    } else {
+                        val message = licenceResult?.errorMessage?.takeIf { it.isNotBlank() }
+                            ?: LICENCE_ERROR_MESSAGE
+                        Log.e(TAG, "Erro na validação de licença: $message")
+                        result.error("LICENCE_ERROR", message, null)
+                    }
+                })
+            })
+        } catch (e: Exception) {
+            // Ex.: executor rejeitou a tarefa. Nunca deixa a Future do Dart sem resposta.
+            Log.e(TAG, "Não foi possível agendar a validação de licença", e)
+            result.error("LICENCE_ERROR", LICENCE_ERROR_MESSAGE, null)
         }
     }
 
     private fun handleConfigureLicence(call: MethodCall, result: Result) {
-        val licenceKeyArgument = call.argument<String>("licenceKey")?.trim() ?: ""
-        val licenceInternalKeyArgument = call.argument<String>("licenceInternalKey")?.trim() ?: ""
+        val licenceKeyArgument = (call.argument<Any>("licenceKey") as? String)?.trim() ?: ""
+        val licenceInternalKeyArgument = (call.argument<Any>("licenceInternalKey") as? String)?.trim() ?: ""
 
         if (licenceKeyArgument.isEmpty()) {
             result.error("INVALID_ARGUMENT", "licenceKey é obrigatório", null)
             return
         }
 
-        if (licenceInternalKeyArgument.isEmpty()) {
-            result.error("INVALID_ARGUMENT", "licenceInternalKey é obrigatório", null)
-            return
-        }
-
         licenceKey = licenceKeyArgument
-        licenceInternalKey = licenceInternalKeyArgument
+        // Opcional: vazio usa o servidor oficial. Valores fora do servidor oficial são ignorados
+        // na validação (LicenceConfig.resolveLicenceUrl).
+        licenceInternalKey = licenceInternalKeyArgument.ifEmpty { LicenceConfig.LICENCE_CHECK_URL }
 
         Log.i(TAG, "Chaves de licença configuradas via Dart")
         result.success(true)
+
+        // O Dart registra o handler de respostas antes de configurar a licença: entrega as pendentes.
+        responseDispatcher.flushPending()
     }
 
     private fun ensureLicenceConfigured(result: Result): Boolean {
-        val hasLicence = !licenceKey.isNullOrBlank() && !licenceInternalKey.isNullOrBlank()
+        val hasLicence = !licenceKey.isNullOrBlank()
         if (!hasLicence) {
             Log.e(TAG, "Licença não configurada. Chame configureLicence antes de usar o plugin.")
             result.error(
@@ -157,263 +210,99 @@ class StoneDeepTechNativePlugin : FlutterPlugin, MethodCallHandler, ActivityAwar
         return hasLicence
     }
 
-    private fun sendDeeplink(
-        amount: Int?,
-        editableAmount: Boolean?,
-        transactionType: String?,
-        installmentCount: Int?,
-        installmentType: String?,
-        orderId: Int?,
-        returnScheme: String?
-    ) {
-        val uriBuilder = Uri.Builder()
-        uriBuilder.authority("pay")
-        uriBuilder.scheme("payment-app")
+    private fun handleIntent(intent: Intent): Boolean = handleIntent(
+        action = intent.action,
+        data = intent.dataString,
+        alreadyHandled = { intent.getBooleanExtra(EXTRA_HANDLED, false) },
+        markHandled = { intent.putExtra(EXTRA_HANDLED, true) }
+    )
 
-        if (returnScheme != null) {
-            uriBuilder.appendQueryParameter(RETURN_SCHEME, returnScheme)
-        }
-
-        uriBuilder.appendQueryParameter(
-            EDITABLE_AMOUNT,
-            if (editableAmount == true) "1" else "0"
-        )
-
-        if (amount != null) {
-            uriBuilder.appendQueryParameter(AMOUNT, amount.toLong().toString())
-        }
-
-        if (transactionType != null) {
-            uriBuilder.appendQueryParameter(TRANSACTION_TYPE, transactionType)
-        }
-
-        if (installmentType != null && transactionType == "CREDIT") {
-            uriBuilder.appendQueryParameter(INSTALLMENT_TYPE, installmentType)
-        }
-
-        if (installmentCount != null) {
-            uriBuilder.appendQueryParameter(INSTALLMENT_COUNT, installmentCount.toString())
-        }
-
-        if (orderId != null) {
-            uriBuilder.appendQueryParameter(ORDER_ID, orderId.toLong().toString())
-        }
-
-        val intent = Intent(Intent.ACTION_VIEW)
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        intent.data = uriBuilder.build()
-
-        context?.startActivity(intent)
-
-        Log.v(TAG, "Deeplink sent: ${intent.data}")
-    }
-
-    private fun sendCancel(
-        returnScheme: String?,
-        atk: String?,
-        amount: Int?,
-        editableAmount: Boolean?
-    ) {
-        val uriBuilder = Uri.Builder()
-        uriBuilder.authority("cancel")
-        uriBuilder.scheme("cancel-app")
-
-        if (returnScheme != null) {
-            uriBuilder.appendQueryParameter("returnscheme", returnScheme)
-        }
-
-        if (atk != null) {
-            uriBuilder.appendQueryParameter(ATK, atk)
-        }
-
-        if (amount != null) {
-            uriBuilder.appendQueryParameter(AMOUNT, amount.toLong().toString())
-        }
-
-        uriBuilder.appendQueryParameter(
-            EDITABLE_AMOUNT,
-            if (editableAmount == true) "true" else "false"
-        )
-
-        val intent = Intent(Intent.ACTION_VIEW)
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        intent.data = uriBuilder.build()
-
-        context?.startActivity(intent)
-
-        Log.v(TAG, "Cancel deeplink sent: ${intent.data}")
-    }
-
-    private fun sendPrint(
-        schemeReturn: String?,
-        printableContent: String?,
-        showFeedbackScreen: Boolean?
-    ) {
-        val uriBuilder = Uri.Builder()
-        uriBuilder.authority("print")
-        uriBuilder.scheme("printer-app")
-
-        if (schemeReturn != null) {
-            uriBuilder.appendQueryParameter("SCHEME_RETURN", schemeReturn)
-        }
-
-        if (printableContent != null) {
-            uriBuilder.appendQueryParameter("PRINTABLE_CONTENT", printableContent)
-        }
-
-        uriBuilder.appendQueryParameter(
-            "SHOW_FEEDBACK_SCREEN",
-            if (showFeedbackScreen == true) "true" else "false"
-        )
-
-        val intent = Intent(Intent.ACTION_VIEW)
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        intent.data = uriBuilder.build()
-
-        context?.startActivity(intent)
-
-        Log.v(TAG, "Print deeplink sent: ${intent.data}")
-    }
-
-    private fun sendReprint(
-        schemeReturn: String?,
-        atk: String?,
-        typeCustomer: String?,
-        showFeedbackScreen: Boolean?
-    ) {
-        val uriBuilder = Uri.Builder()
-        uriBuilder.authority("reprint")
-        uriBuilder.scheme("reprinter-app")
-
-        if (schemeReturn != null) {
-            uriBuilder.appendQueryParameter("SCHEME_RETURN", schemeReturn)
-        }
-
-        if (atk != null) {
-            uriBuilder.appendQueryParameter(ATK, atk)
-        }
-
-        if (typeCustomer != null) {
-            uriBuilder.appendQueryParameter(TYPE_CUSTOMER, typeCustomer)
-        }
-
-        uriBuilder.appendQueryParameter(
-            "SHOW_FEEDBACK_SCREEN",
-            if (showFeedbackScreen == true) "true" else "false"
-        )
-
-        val intent = Intent(Intent.ACTION_VIEW)
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        intent.data = uriBuilder.build()
-
-        context?.startActivity(intent)
-
-        Log.v(TAG, "Reprint deeplink sent: ${intent.data}")
-    }
-
-    private fun handleDeepLinkResponse(intent: Intent?) {
+    /**
+     * Trata um intent recebido (abertura ou onNewIntent). Retorna true (consumido) só se for resposta da
+     * Stone: `ACTION_VIEW` com o scheme de retorno enviado à Stone e ainda não entregue. O intent é
+     * marcado com [EXTRA_HANDLED]; se a Activity for recriada com o mesmo intent, ele não é reentregue.
+     */
+    @VisibleForTesting
+    internal fun handleIntent(
+        action: String?,
+        data: String?,
+        alreadyHandled: () -> Boolean,
+        markHandled: () -> Unit
+    ): Boolean {
+        if (action != Intent.ACTION_VIEW) return false
+        val scheme = DeeplinkRequest.schemeOf(data) ?: return false
+        if (!returnSchemes.contains(scheme)) return false // deeplink do próprio app: não consome
+        if (alreadyHandled()) return true                  // já entregue (Activity recriada)
         try {
-            val data = intent?.data
-            if (data != null) {
-                Log.i(TAG, "Deeplink response received: $data")
-                channel.invokeMethod("onDeeplinkResponse", data.toString())
-            }
+            markHandled()
         } catch (e: Exception) {
-            Log.e(TAG, "Error handling deeplink response", e)
-            channel.invokeMethod("onDeeplinkError", e.message ?: "Unknown error")
+            Log.w(TAG, "Não foi possível marcar o intent como entregue", e)
         }
+        onDeeplinkResponseData(data)
+        return true
+    }
+
+    /** Entrega ao Dart a URI de retorno da Stone (ignora intents sem dados). */
+    @VisibleForTesting
+    internal fun onDeeplinkResponseData(data: String?) {
+        if (data.isNullOrEmpty()) return
+        Log.i(TAG, "Deeplink response received: $data")
+        responseDispatcher.dispatch("onDeeplinkResponse", data)
     }
 
     override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
-        channel.setMethodCallHandler(null)
+        channel?.setMethodCallHandler(null)
+        channel = null
         context = null
         licenceTech = null
         licenceKey = null
         licenceInternalKey = null
-    }
-
-    private fun isValidLicence(): Boolean {
-        return try {
-            val configuredLicenceKey = licenceKey?.trim().orEmpty()
-            val configuredLicenceInternalKey = licenceInternalKey?.trim().orEmpty()
-
-            if (configuredLicenceKey.isEmpty() || configuredLicenceInternalKey.isEmpty()) {
-                Log.e(TAG, "Licença não configurada")
-                return false
-            }
-
-            val resultLicence = licenceTech?.validateLicence(
-                configuredLicenceKey,
-                configuredLicenceInternalKey
-            )
-            val isValid = resultLicence?.result == 0
-
-            Log.i(TAG, "*resultLicence: $isValid")
-
-            if (!isValid && resultLicence != null) {
-                Log.e(TAG, "Erro na validação de licença: ${resultLicence.errorMessage}")
-            }
-
-            isValid
-        } catch (e: Exception) {
-            Log.e(TAG, "Erro ao validar licença", e)
-            false
-        }
+        responseDispatcher.clear()
+        licenceExecutor?.shutdown()
+        licenceExecutor = null
     }
 
     private fun initialiseLicenceDefaults() {
         val defaultLicenceKey = BuildConfig.LICENCE_KEY
         val defaultLicenceInternalKey = BuildConfig.LICENCE_INTERNAL_KEY
 
-        if (!defaultLicenceKey.isNullOrBlank() && !defaultLicenceInternalKey.isNullOrBlank()) {
+        if (!defaultLicenceKey.isNullOrBlank()) {
             licenceKey = defaultLicenceKey
-            licenceInternalKey = defaultLicenceInternalKey
+            licenceInternalKey = defaultLicenceInternalKey.ifBlank { LicenceConfig.LICENCE_CHECK_URL }
             Log.i(TAG, "Chaves de licença carregadas do BuildConfig")
         } else {
             Log.w(TAG, "Chaves de licença do BuildConfig estão vazias. Aguardando configuração via Dart.")
         }
     }
 
-    override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+    private fun attachActivity(binding: ActivityPluginBinding, handleLaunchIntent: Boolean) {
+        activityBinding?.removeOnNewIntentListener(newIntentListener)
         activityBinding = binding
-        binding.addOnNewIntentListener { intent ->
-            if (intent.action == Intent.ACTION_VIEW) {
-                handleDeepLinkResponse(intent)
-                true
-            } else {
-                false
-            }
-        }
-        binding.activity.intent?.let { intent ->
-            if (intent.action == Intent.ACTION_VIEW) {
-                handleDeepLinkResponse(intent)
-            }
-        }
+        binding.addOnNewIntentListener(newIntentListener)
+
+        if (!handleLaunchIntent) return
+        binding.activity.intent?.let { handleIntent(it) }
+    }
+
+    private fun detachActivity() {
+        activityBinding?.removeOnNewIntentListener(newIntentListener)
+        activityBinding = null
+    }
+
+    override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        attachActivity(binding, handleLaunchIntent = true)
     }
 
     override fun onDetachedFromActivityForConfigChanges() {
-        activityBinding = null
+        detachActivity()
     }
 
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
-        activityBinding = binding
-        binding.addOnNewIntentListener { intent ->
-            if (intent.action == Intent.ACTION_VIEW) {
-                handleDeepLinkResponse(intent)
-                true
-            } else {
-                false
-            }
-        }
-        binding.activity.intent?.let { intent ->
-            if (intent.action == Intent.ACTION_VIEW) {
-                handleDeepLinkResponse(intent)
-            }
-        }
+        // Mudança de configuração (ex.: rotação): o intent de abertura já foi entregue.
+        attachActivity(binding, handleLaunchIntent = false)
     }
 
     override fun onDetachedFromActivity() {
-        activityBinding = null
+        detachActivity()
     }
 }
-

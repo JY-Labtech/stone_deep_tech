@@ -55,6 +55,8 @@ android {
     }
 
     testOptions {
+        // android.util.Log etc. viram stubs que não lançam exceção nos testes JVM.
+        unitTests.returnDefaultValues = true
         unitTests.all {
             testLogging {
                events "passed", "skipped", "failed", "standardOut", "standardError"

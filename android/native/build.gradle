@@ -72,6 +72,18 @@ android {
     lint {
         abortOnError = false
     }
+
+    testOptions {
+        unitTests {
+            // android.util.Log, Uri, Intent etc. viram stubs que não lançam exceção nos testes JVM.
+            returnDefaultValues = true
+            all {
+                testLogging {
+                    events "passed", "skipped", "failed"
+                }
+            }
+        }
+    }
 }
 
 dependencies {
@@ -79,5 +91,10 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.22")
     compileOnly(files(flutterJar))
+
+    testImplementation("junit:junit:4.13.2")
+    // org.json do android.jar é stub em testes JVM.
+    testImplementation("org.json:json:20240303")
+    testImplementation(files(flutterJar))
 }
 

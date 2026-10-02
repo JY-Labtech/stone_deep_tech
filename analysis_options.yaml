@@ -3,5 +3,9 @@ include: package:flutter_lints/flutter.yaml
 formatter:
   page_width: 120
   trailing_commas: preserve
+analyzer:
+  exclude:
+    - build/**
+    - android/**
 # Additional information about this file can be found at
 # https://dart.dev/guides/language/analysis-options

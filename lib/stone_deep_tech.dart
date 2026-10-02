@@ -1,8 +1,7 @@
-import 'dart:async';
-
 import 'package:flutter/services.dart';
 import 'package:stone_deep_tech/src/deeplink/deeplink.dart';
 import 'package:stone_deep_tech/src/interface/handler/ideeplink_handler.dart';
+import 'package:stone_deep_tech/src/licence/constants/licence_constants.dart';
 
 export 'src/deeplink/deeplink.dart';
 export 'src/interface/handler/ideeplink_handler.dart';
@@ -27,22 +26,18 @@ class StoneDeepTech {
     return _instance!;
   }
 
-  /// Function to initialize deeplink and register the handler
+  /// Function to initialize deeplink and register the handler.
+  ///
+  /// [licenceInternalKey] é opcional (padrão: [licenceCheck], servidor oficial da
+  /// JY Labtech). Valores que não apontam para o servidor oficial são ignorados
+  /// pelo nativo, que sempre valida em `licence-server.invalid`.
   Deeplink initDeeplink({
     required IDeepLinkHandler handler,
     required String licenceKey,
-    required String licenceInternalKey,
+    String licenceInternalKey = licenceCheck,
   }) {
-    if (_deeplink != null) {
-      _deeplink!.setHandler(handler);
-      unawaited(
-        _deeplink!.updateLicence(
-          licenceKey: licenceKey,
-          licenceInternalKey: licenceInternalKey,
-        ),
-      );
-      return _deeplink!;
-    }
+    // Deeplink.create reaproveita a instância existente: troca o handler e
+    // reconfigura a licença (falhas do nativo vão para handler.onError).
     _deeplink = Deeplink.create(
       channel: _channel,
       handler: handler,
@@ -55,7 +50,7 @@ class StoneDeepTech {
   /// Get the Deeplink object. Note: It needs to be initialized.
   Deeplink get deeplink {
     if (_deeplink == null) {
-      throw "DEEPLINK NEEDS TO BE INITIALIZED! \n TRY: StoneDeepTech.I.initDeeplink(handler: ..., licenceKey: '...', licenceInternalKey: '...')";
+      throw "DEEPLINK NEEDS TO BE INITIALIZED! \n TRY: StoneDeepTech.I.initDeeplink(handler: ..., licenceKey: '...')";
     }
     return _deeplink!;
   }

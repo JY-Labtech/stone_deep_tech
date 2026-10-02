@@ -33,9 +33,10 @@ O **Stone Deep Tech** é um plugin Flutter que permite que desenvolvedores integ
 
 ## 📦 Requisitos
 
-- Flutter SDK: >=3.0.0
+- Dart SDK: >=3.9.2 (Flutter compatível)
 - Android: SDK mínimo 24 (Android 7.0)
 - Aplicativo Stone instalado no dispositivo
+- Licença do plugin ativa (veja [Licença do plugin](#-licença-do-plugin))
 
 ## 🚀 Instalação
 
@@ -43,8 +44,7 @@ Adicione o plugin ao seu `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  stone_deep_tech:
-    path: ../stone_deep_tech # ou use a versão do pub.dev
+  stone_deep_tech: ^1.2.0
 ```
 
 Execute:
@@ -93,39 +93,69 @@ Crie ou atualize o arquivo `res/values/strings.xml`:
 
 Substitua `seu_app_scheme` pelo scheme único do seu aplicativo (ex: `meuapp`, `stone_deep_tech_example`).
 
-### 3. Configurar as Chaves de Licença
+### 3. Configurar a Chave de Licença
 
-As chaves de licença agora são enviadas pelo código Dart ao inicializar o plugin:
+A chave de licença é enviada pelo código Dart ao inicializar o plugin:
 
 ```dart
 StoneDeepTech.I.initDeeplink(
   handler: handler,
   licenceKey: const String.fromEnvironment('STONE_DEEP_TECH_LICENCE_KEY'),
-  licenceInternalKey: const String.fromEnvironment('STONE_DEEP_TECH_LICENCE_INTERNAL_KEY'),
 );
 ```
 
-Sugerimos definir as chaves com `--dart-define` (ou outro mecanismo seguro) ao executar seu app:
+- `licenceKey` (obrigatório): a chave da sua licença, copiada do portal [portal.jylabtech.com.br](https://portal.jylabtech.com.br).
+- `licenceInternalKey` (opcional): o padrão é a constante `licenceCheck` exportada pelo plugin (base64 de `https://licence-server.invalid/pos-payments/licence/check`). Não é preciso informar.
+
+> **A validação acontece sempre no servidor oficial da JY Labtech** (`https://licence-server.invalid/pos-payments/licence/check`). O `licenceInternalKey` só é aceito se apontar para esse servidor (https, host `licence-server.invalid`, caminho `/pos-payments/licence/check...`), em texto puro ou base64. Qualquer outro valor é ignorado e o servidor oficial é usado, inclusive o valor antigo (`***REMOVIDO***...`), outros hosts e URLs sem TLS.
+
+Sugerimos definir a chave com `--dart-define` (ou outro mecanismo seguro) ao executar seu app:
 
 ```bash
-flutter run \
-  --dart-define STONE_DEEP_TECH_LICENCE_KEY="sua_chave_aqui" \
-  --dart-define STONE_DEEP_TECH_LICENCE_INTERNAL_KEY="***REMOVIDO***"
+flutter run --dart-define STONE_DEEP_TECH_LICENCE_KEY="sua_chave_aqui"
 ```
 
-Alternativamente, armazene as chaves em um serviço seguro (ex.: vault, remote config) e só então invoque `initDeeplink`.
+Alternativamente, armazene a chave em um serviço seguro (ex.: vault, remote config) e só então invoque `initDeeplink`. Para trocar a chave depois da inicialização, use `StoneDeepTech.I.deeplink.updateLicence(licenceKey: ...)`.
 
 ### 4. Validação de Licença
 
-O plugin valida automaticamente a licença antes de permitir qualquer operação. Se a licença não estiver válida ou não estiver configurada, todas as chamadas de método retornarão um erro com código `LICENCE_ERROR`.
+O plugin valida a licença no nativo **antes de cada operação** (`sendDeeplink`, `sendCancel`, `sendPrint`, `sendReprint`). O app da Stone só é aberto se a licença for válida e ativa. Se a licença for inválida, vencida, suspensa, cancelada, inativa ou não puder ser validada, a operação é bloqueada com o código `LICENCE_ERROR` (ou `LICENCE_NOT_CONFIGURED` se a chave não foi informada), entregue em `IDeepLinkHandler.onError`, e o método retorna `false`. Nesse caso `onDeeplinkSent` não é chamado.
 
 **Como funciona:**
 
-1. Primeiro verifica se existe uma licença válida armazenada localmente (criptografada)
-2. Se não existir ou estiver expirada, faz uma requisição ao servidor de licenciamento
-3. A licença é armazenada localmente de forma criptografada por até 7 dias
-4. Após 7 dias, a validação é feita novamente contra o servidor
-5. Se a validação falhar, todas as operações são bloqueadas
+1. Primeiro verifica se existe uma licença válida armazenada localmente (criptografada), sem usar a rede
+2. Se não existir, consulta o servidor oficial da JY Labtech (em background, com timeout de 15 s, sem travar a interface)
+3. A licença só é aceita se o servidor responder com sucesso e ela estiver dentro da validade (`expiredAt`) e não estiver vencida, inativa nem cancelada
+4. A licença validada fica guardada offline (criptografada) por no máximo 7 dias sem nova consulta, e nunca além do vencimento. O cache é descartado se a chave mudar, se o relógio do aparelho estiver adulterado (data de gravação no futuro) ou se a licença estiver vencida
+5. Depois disso o aparelho precisa de internet para revalidar
+6. Se a validação falhar, todas as operações são bloqueadas
+
+## 🔑 Licença do plugin
+
+- **Onde adquirir:** crie sua conta ou entre no portal [portal.jylabtech.com.br](https://portal.jylabtech.com.br). Quem já tinha conta no portal antigo entra com o mesmo e-mail e a mesma senha.
+- **Produto:** "Licença plugin de pagamento". Uma mesma licença vale para qualquer plugin de pagamento da JY Labtech.
+- **Planos:**
+  - `debug`: cortesia concedida automaticamente no autocadastro, válida por 365 dias e limitada a 2 aparelhos. Ideal para desenvolvimento e testes.
+  - `mensal`: cobrado por dispositivo.
+- **Limite por dispositivo:** cada aparelho que valida a licença ocupa uma vaga. O aparelho é identificado principalmente pelo ANDROID_ID. Aparelhos podem ser consultados e desativados no portal; um aparelho desativado fica bloqueado.
+- **Chaves existentes continuam valendo:** as chaves emitidas antes da migração para o novo portal não mudaram. Chaves novas no formato `JYL-...` também funcionam.
+- **Migração do `licenceInternalKey`:** a partir da 1.2.0 o parâmetro é opcional e pode ser removido. O valor antigo (que começa com `***REMOVIDO***...`) não aponta mais para o servidor antigo: ele é ignorado e a validação vai para o servidor oficial.
+
+### Erros de licença
+
+Quando o servidor recusa a licença, a resposta traz `{"message": "..."}`. A mensagem é registrada no Logcat (tag `StoneDeepTechNative`, "Erro na validação de licença: ...") e a operação retorna `LICENCE_ERROR`.
+
+| HTTP | Significado | O que fazer |
+| ---- | ----------- | ----------- |
+| 404 | Licença não encontrada | Confira a `licenceKey` copiada do portal |
+| 412 | Limite de aparelhos atingido ou aparelho desativado | Libere/reative o aparelho no portal ou contrate mais dispositivos |
+| 428 | Licença vencida, suspensa ou cancelada | Renove ou regularize o pagamento no portal |
+| 403 | Requisição sem chave | Informe `licenceKey` em `initDeeplink` |
+| 400 | Aparelho sem identificador estável | Verifique se o aparelho fornece ANDROID_ID |
+| 429 | Muitas consultas em pouco tempo | Aguarde alguns instantes e tente novamente |
+| 5xx | Erro interno do servidor | Tente novamente mais tarde |
+
+Se o corpo da resposta não trouxer `message`, o erro é `Erro ao validar licença (HTTP <código>)`. Sem internet ou em timeout, o erro informa a falha de conexão.
 
 ## 📖 Como Usar
 
@@ -161,7 +191,6 @@ final handler = MyDeepLinkHandler();
 StoneDeepTech.I.initDeeplink(
   handler: handler,
   licenceKey: 'SUA_CHAVE',
-  licenceInternalKey: 'SUA_CHAVE_INTERNA',
 );
 ```
 
@@ -322,7 +351,7 @@ Classe principal do plugin, singleton.
 #### Métodos
 
 - `static StoneDeepTech get I` - Retorna a instância singleton
-- `Deeplink initDeeplink({required IDeepLinkHandler handler, required String licenceKey, required String licenceInternalKey})` - Inicializa o plugin com um handler e configura as chaves de licença
+- `Deeplink initDeeplink({required IDeepLinkHandler handler, required String licenceKey, String licenceInternalKey = licenceCheck})` - Inicializa o plugin com um handler e configura a licença (`licenceInternalKey` é opcional; valores fora do servidor oficial são ignorados)
 
 ### DeeplinkParams
 
@@ -468,7 +497,6 @@ class _PaymentPageState extends State<PaymentPage> implements IDeepLinkHandler {
     StoneDeepTech.I.initDeeplink(
       handler: this,
       licenceKey: 'SUA_CHAVE',
-      licenceInternalKey: 'SUA_CHAVE_INTERNA',
     );
   }
 
@@ -561,7 +589,6 @@ void printReceipt() {
   StoneDeepTech.I.initDeeplink(
     handler: handler,
     licenceKey: 'SUA_CHAVE',
-    licenceInternalKey: 'SUA_CHAVE_INTERNA',
   );
 
   final content = [
@@ -592,16 +619,20 @@ void printReceipt() {
 
 ### Erros de Licença
 
+Os métodos do `Deeplink` não lançam exceção: em caso de falha retornam `false` e entregam a mensagem em `IDeepLinkHandler.onError`.
+
 ```dart
-try {
-  await StoneDeepTech.I.deeplink.sendDeeplink(params);
-} catch (e) {
-  if (e.toString().contains('LICENCE_ERROR')) {
-    // Licença inválida ou não configurada
-    print('Configure as chaves de licença antes de chamar initDeeplink (ex.: via --dart-define).');
+@override
+Future<void> onError(String message) async {
+  if (message.contains('LICENCE_ERROR') ||
+      message.contains('LICENCE_NOT_CONFIGURED')) {
+    // Licença inválida, vencida, sem vaga para o aparelho ou não configurada
+    print('Verifique a licença em https://portal.jylabtech.com.br');
   }
 }
 ```
+
+Veja a tabela de [erros de licença](#erros-de-licença) para os motivos retornados pelo servidor.
 
 ### Erros de Validação
 
@@ -640,15 +671,21 @@ if (printResult == PrintResult.printerOutOfPaper) {
 2. Verifique se o `launchMode="singleTop"` está configurado
 3. Verifique se o `returnScheme` corresponde ao `strings.xml`
 4. Verifique se o handler está implementado corretamente
+5. A resposta só é reconhecida se o scheme da URI de retorno for o mesmo informado em `returnScheme`/`schemeReturn` (sem diferenciar maiúsculas/minúsculas). Outros deeplinks do app são ignorados pelo plugin e seguem normalmente; use um scheme exclusivo para o retorno da Stone
+6. Chame `StoneDeepTech.I.initDeeplink` logo na inicialização do app: se o app for aberto pela resposta da Stone antes disso, a resposta fica guardada e é entregue a `onDeeplinkResponse` assim que o plugin for inicializado
 
 ### Problema: Erro de licença
 
 **Solução:**
 
 1. Verifique se as chaves estão sendo fornecidas ao chamar `StoneDeepTech.I.initDeeplink`
-2. Verifique se as chaves são válidas
-3. Verifique a conexão com a internet (primeira validação)
-4. Verifique os logs para mensagens de erro específicas
+2. Confira a `licenceKey` no portal [portal.jylabtech.com.br](https://portal.jylabtech.com.br) e se a licença está ativa e dentro da validade
+3. Não é preciso informar `licenceInternalKey`: a validação sempre vai para o servidor oficial da JY Labtech
+4. Verifique a conexão com a internet (primeira validação e a cada 7 dias)
+5. Veja no Logcat (tag `StoneDeepTechNative`) a mensagem retornada pelo servidor e consulte a tabela de [erros de licença](#erros-de-licença)
+6. Erro 412: o limite de aparelhos foi atingido ou o aparelho foi desativado; ajuste no portal
+7. Trocou de chave ou de plano? Quando a chave muda, a licença salva offline é ignorada e revalidada no servidor
+8. Licença renovada ou reativada no portal? A próxima operação revalida no servidor quando o cache offline não for mais válido (no máximo 7 dias)
 
 ### Problema: Parcelamento não funciona
 
@@ -689,7 +726,27 @@ lib/
 4. **Callbacks**: Os callbacks são assíncronos e podem ser chamados de qualquer thread
 5. **Parcelamento**: `installmentType` só é enviado quando `transactionType` é `credit`
 6. **Impressão**: Imagens devem estar em formato Base64
-7. **Valores**: Todos os valores monetários são em centavos (inteiros)
+7. **Valores**: Todos os valores monetários são em centavos (inteiros); `amount` e `orderId` aceitam inteiros de 64 bits
+8. **Resposta única**: cada chamada do plugin recebe exatamente uma resposta do nativo (`true`/`false`); erros de configuração da licença disparados por `initDeeplink` chegam em `onError`
+9. **Resultado de impressão**: `PrintResult.fromUri`/`DeeplinkResponseParser.parsePrintResult` leem primeiro o código dos parâmetros `result`, `status`, `code` ou `print_result` da URI de retorno
+
+## 🧪 Testes
+
+Testes Dart (MethodChannel mockado): todos os métodos públicos (argumentos exatos enviados ao nativo, sucesso, `PlatformException`, `LICENCE_ERROR`), as chamadas nativo → Dart, os modelos, os enums e os parsers:
+
+```bash
+flutter test
+```
+
+Testes nativos JVM, com JDK 17: validação de licença (regras, URL travada no servidor oficial, parse da resposta, cache offline), gate de licença por operação, URI de cada deeplink da Stone (`DeeplinkRequests`), resposta única (`SafeResult`), entrega das respostas da Stone ao Dart e a ponte do plugin:
+
+```bash
+cd example/android
+./gradlew --no-daemon -p ../../android/native testReleaseUnitTest
+./gradlew --no-daemon :stone_deep_tech:testDebugUnitTest
+```
+
+O primeiro comando exige `flutter precache --android` no SDK definido em `android/native/local.properties` (`flutter.sdk`) ou em `FLUTTER_SDK`. Depois de alterar `android/native`, regenere os binários com `make build-native` (ou `sh scripts/build_android_aar.sh`; argumentos extras do Gradle via `GRADLE_ARGS`, ex.: `GRADLE_ARGS="--no-daemon -Dorg.gradle.jvmargs=-Xmx2g"`).
 
 ## 🔗 Referências
 
