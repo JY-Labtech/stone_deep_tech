@@ -3,7 +3,8 @@ package br.com.jylabtech.stone_deep_tech.licence;
 public class LicenceResult {
     private String method;
     private String errorMessage;
-    private int result;
+    // Começa como erro: só vira sucesso (0) quando a licença for validada explicitamente.
+    private int result = 999999;
     private String message;
 
     private CheckLicenceEntity licenceEntity;
@@ -46,6 +47,10 @@ public class LicenceResult {
 
     public int getResult() {
         return this.result;
+    }
+
+    public boolean isSuccess() {
+        return this.result == 0;
     }
 }
 

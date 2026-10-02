@@ -6,21 +6,18 @@ import android.os.Build;
 import android.provider.Settings;
 import android.util.Log;
 
-import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.SocketTimeoutException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.Date;
 import java.util.UUID;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 
 class LicenceInvalidException extends Exception { LicenceInvalidException(String msg) { super(msg); } }
 class LicenceUnAuthorizedException extends Exception { LicenceUnAuthorizedException(String msg) { super(msg); } }
@@ -30,111 +27,88 @@ class LicenceExpiredException extends Exception { LicenceExpiredException(String
 class LicenceInternalErrorException extends Exception { LicenceInternalErrorException(String msg) { super(msg); } }
 class LicenceErrorException extends Exception { LicenceErrorException(String msg) { super(msg); } }
 
-public class LicenceProvider {
+public class LicenceProvider implements LicenceRemote {
+
+    private static final String TAG = "LicenceProvider";
+    static final int CONNECT_TIMEOUT_MS = 15_000;
+    static final int READ_TIMEOUT_MS = 15_000;
 
     private final Context context;
-    private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
     public LicenceProvider(Context context) {
         this.context = context;
     }
 
-    public LicenceResult checkLicence(final String urlString, final String licenceKey) throws Exception {
-        LicenceResult licenceResult = new LicenceResult();
-        licenceResult.setMethod("licence");
-        Callable<LicenceResult> task = new Callable<LicenceResult>() {
-            @Override
-            public LicenceResult call() throws Exception {
-                HttpURLConnection connection = null;
-                try {
-                    String deviceId = getAndroidId();
-                    String deviceUid = getSerialNumber();
-                    String deviceLocalId = getDeviceUUID();
-                    String deviceName = Build.MODEL;
-
-                    URL url = new URL(urlString);
-                    connection = (HttpURLConnection) url.openConnection();
-                    connection.setRequestMethod("POST");
-                    connection.setRequestProperty("Content-Type", "application/json");
-
-                    if (!licenceKey.isEmpty()) {
-                        connection.setRequestProperty("Authorization", "Bearer licence:" + licenceKey);
-                    }
-
-                    connection.setDoOutput(true);
-
-                    JSONObject body = new JSONObject();
-                    body.put("deviceId", deviceId);
-                    body.put("deviceUid", deviceUid);
-                    body.put("deviceLocalId", deviceLocalId);
-                    body.put("deviceName", deviceName);
-
-                    OutputStream os = connection.getOutputStream();
-                    os.write(body.toString().getBytes(StandardCharsets.UTF_8));
-                    os.flush();
-                    os.close();
-
-                    int responseCode = connection.getResponseCode();
-                    BufferedReader reader;
-
-                    if (responseCode == HttpURLConnection.HTTP_OK) {
-                        reader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
-                        StringBuilder responseStr = new StringBuilder();
-                        String line;
-                        while ((line = reader.readLine()) != null) {
-                            responseStr.append(line);
-                        }
-                        reader.close();
-
-                        licenceResult.setResult(0);
-                        licenceResult.setLicenceEntity(CheckLicenceEntity.fromJson(responseStr.toString()));
-
-                        return licenceResult;
-                    } else {
-
-                        licenceResult.setResult(999999);
-                        licenceResult.setErrorMessage(handleErrors(connection));
-
-                        return licenceResult;
-                    }
-
-                } finally {
-                    if (connection != null) {
-                        connection.disconnect();
-                    }
-                }
-            }
-        };
-
-        Future<LicenceResult> future = executor.submit(task);
+    /**
+     * Consulta a licença no servidor. Bloqueante: chame fora da main thread.
+     * Nunca lança exceção; qualquer falha vira um LicenceResult de erro.
+     */
+    @Override
+    public LicenceResult checkLicence(final String urlString, final String licenceKey) {
+        HttpURLConnection connection = null;
         try {
-            return future.get();
-        } catch (ExecutionException e) {
-            licenceResult.setResult(999999);
-            licenceResult.setErrorMessage(e.getMessage());
-            return licenceResult;
+            String deviceId = getAndroidId();
+            String deviceUid = getSerialNumber();
+            String deviceLocalId = getDeviceUUID();
+            String deviceName = Build.MODEL;
+
+            URL url = new URL(urlString);
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
+            connection.setReadTimeout(READ_TIMEOUT_MS);
+            connection.setRequestMethod("POST");
+            connection.setRequestProperty("Content-Type", "application/json");
+
+            if (licenceKey != null && !licenceKey.isEmpty()) {
+                connection.setRequestProperty("Authorization", "Bearer licence:" + licenceKey);
+            }
+
+            connection.setDoOutput(true);
+
+            JSONObject body = new JSONObject();
+            body.put("deviceId", deviceId);
+            body.put("deviceUid", deviceUid);
+            body.put("deviceLocalId", deviceLocalId);
+            body.put("deviceName", deviceName);
+
+            OutputStream os = connection.getOutputStream();
+            os.write(body.toString().getBytes(StandardCharsets.UTF_8));
+            os.flush();
+            os.close();
+
+            int responseCode = connection.getResponseCode();
+            String responseBody = responseCode == HttpURLConnection.HTTP_OK
+                    ? readStream(connection.getInputStream())
+                    : readStream(connection.getErrorStream());
+
+            return LicenceRules.evaluateResponse(responseCode, responseBody, new Date());
+        } catch (SocketTimeoutException e) {
+            Log.e(TAG, "Tempo esgotado ao validar licença", e);
+            return LicenceRules.error("Tempo esgotado ao validar licença. Verifique a conexão com a internet.");
+        } catch (Exception e) {
+            Log.e(TAG, "Erro ao validar licença", e);
+            String detail = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            return LicenceRules.error("Erro ao validar licença: " + detail);
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
         }
     }
 
-    private String handleErrors(HttpURLConnection connection) throws Exception {
-        String errorMessage = "Erro interno";
-        BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getErrorStream()));
-        StringBuilder responseStr = new StringBuilder();
-        String line;
-        while ((line = reader.readLine()) != null) {
-            responseStr.append(line);
+    private static String readStream(InputStream stream) {
+        if (stream == null) return null;
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+            StringBuilder responseStr = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                responseStr.append(line);
+            }
+            return responseStr.toString();
+        } catch (Exception e) {
+            Log.d(TAG, "Erro ao ler resposta do servidor de licenças", e);
+            return null;
         }
-        reader.close();
-
-        try {
-            JSONObject json = new JSONObject(responseStr.toString());
-            errorMessage = json.optString("message", errorMessage);
-        } catch (JSONException e) {
-            Log.d("LicenceProvider", "Erro ao parsear resposta de erro", e);
-            errorMessage = e.getMessage();
-        }
-
-        return errorMessage;
     }
 
     @SuppressLint("HardwareIds")

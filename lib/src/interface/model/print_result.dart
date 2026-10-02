@@ -80,8 +80,17 @@ enum PrintResult {
     }
   }
 
-  /// Parse result code from URI string
+  /// Parse result code from URI string.
+  ///
+  /// Usa primeiro o código dos parâmetros da URI (`result`, `status`, `code`,
+  /// `print_result`) e, se não houver um código conhecido, procura o código em
+  /// qualquer parte da URI (comportamento anterior). Assim um scheme ou host
+  /// que contenha "success" não mascara um erro informado no parâmetro.
   static PrintResult? fromUri(String uri) {
+    final code = DeeplinkResponseParser.extractResultCode(uri);
+    final fromParameter = code == null ? null : fromString(code);
+    if (fromParameter != null) return fromParameter;
+
     final uriLower = uri.toLowerCase();
     for (final result in PrintResult.values) {
       if (uriLower.contains(result.value.toLowerCase())) {
@@ -91,15 +100,14 @@ enum PrintResult {
     return null;
   }
 
-  /// Parse result code from result string
+  /// Parse result code from result string (sem diferenciar maiúsculas/minúsculas
+  /// e ignorando espaços nas pontas).
   static PrintResult? fromString(String result) {
-    try {
-      return PrintResult.values.firstWhere(
-        (e) => e.value == result.toUpperCase(),
-      );
-    } catch (e) {
-      return null;
+    final normalized = result.trim().toUpperCase();
+    for (final value in PrintResult.values) {
+      if (value.value == normalized) return value;
     }
+    return null;
   }
 }
 

@@ -6,6 +6,7 @@ import 'package:stone_deep_tech/src/interface/model/deeplink_params.dart';
 import 'package:stone_deep_tech/src/interface/model/cancel_params.dart';
 import 'package:stone_deep_tech/src/interface/model/print_params.dart';
 import 'package:stone_deep_tech/src/interface/model/reprint_params.dart';
+import 'package:stone_deep_tech/src/licence/constants/licence_constants.dart';
 
 /// Deeplink class to handle Stone payment deeplinks
 final class Deeplink {
@@ -20,18 +21,20 @@ final class Deeplink {
     required this.handler,
   });
 
-  /// Factory method to create Deeplink instance
+  /// Factory method to create Deeplink instance.
+  ///
+  /// [licenceInternalKey] é opcional (padrão: [licenceCheck]).
   static Deeplink create({
     required MethodChannel channel,
     required IDeepLinkHandler handler,
     required String licenceKey,
-    required String licenceInternalKey,
+    String licenceInternalKey = licenceCheck,
   }) {
     final sanitizedLicenceKey = licenceKey.trim();
-    final sanitizedLicenceInternalKey = licenceInternalKey.trim();
+    final sanitizedLicenceInternalKey = _sanitizeInternalKey(licenceInternalKey);
 
-    if (sanitizedLicenceKey.isEmpty || sanitizedLicenceInternalKey.isEmpty) {
-      throw ArgumentError('licenceKey e licenceInternalKey são obrigatórios.');
+    if (sanitizedLicenceKey.isEmpty) {
+      throw ArgumentError('licenceKey é obrigatório.');
     }
 
     if (_instance == null) {
@@ -57,13 +60,30 @@ final class Deeplink {
     }
 
     unawaited(
-      _instance!._configureLicence(
+      _instance!._configureLicenceReportingErrors(
         licenceKey: sanitizedLicenceKey,
         licenceInternalKey: sanitizedLicenceInternalKey,
       ),
     );
 
     return _instance!;
+  }
+
+  /// Configuração disparada sem `await` (em [create]): uma falha do nativo
+  /// (ex.: MissingPluginException) vai para [IDeepLinkHandler.onError] em vez
+  /// de virar erro assíncrono não tratado.
+  Future<void> _configureLicenceReportingErrors({
+    required String licenceKey,
+    required String licenceInternalKey,
+  }) async {
+    try {
+      await _configureLicence(
+        licenceKey: licenceKey,
+        licenceInternalKey: licenceInternalKey,
+      );
+    } catch (e) {
+      await handler.onError(e.toString());
+    }
   }
 
   Future<void> _configureLicence({
@@ -76,15 +96,22 @@ final class Deeplink {
     });
   }
 
+  static String _sanitizeInternalKey(String licenceInternalKey) {
+    final value = licenceInternalKey.trim();
+    return value.isEmpty ? licenceCheck : value;
+  }
+
+  /// Atualiza as chaves de licença. [licenceInternalKey] é opcional
+  /// (padrão: [licenceCheck]).
   Future<void> updateLicence({
     required String licenceKey,
-    required String licenceInternalKey,
+    String licenceInternalKey = licenceCheck,
   }) {
     final sanitizedLicenceKey = licenceKey.trim();
-    final sanitizedLicenceInternalKey = licenceInternalKey.trim();
+    final sanitizedLicenceInternalKey = _sanitizeInternalKey(licenceInternalKey);
 
-    if (sanitizedLicenceKey.isEmpty || sanitizedLicenceInternalKey.isEmpty) {
-      throw ArgumentError('licenceKey e licenceInternalKey são obrigatórios.');
+    if (sanitizedLicenceKey.isEmpty) {
+      throw ArgumentError('licenceKey é obrigatório.');
     }
 
     return _configureLicence(
@@ -94,46 +121,30 @@ final class Deeplink {
   }
 
   /// Send deeplink to Stone payment app
-  Future<bool> sendDeeplink(DeeplinkParams params) async {
-    try {
-      await handler.onDeeplinkSent();
-      await channel.invokeMethod('sendDeeplink', params.toMap());
-      return true;
-    } catch (e) {
-      await handler.onError(e.toString());
-      return false;
-    }
-  }
+  Future<bool> sendDeeplink(DeeplinkParams params) =>
+      _invokeOperation('sendDeeplink', params.toMap());
 
   /// Send cancellation deeplink to Stone payment app
-  Future<bool> sendCancel(CancelParams params) async {
-    try {
-      await handler.onDeeplinkSent();
-      await channel.invokeMethod('sendCancel', params.toMap());
-      return true;
-    } catch (e) {
-      await handler.onError(e.toString());
-      return false;
-    }
-  }
+  Future<bool> sendCancel(CancelParams params) =>
+      _invokeOperation('sendCancel', params.toMap());
 
   /// Send custom print deeplink to Stone payment app
-  Future<bool> sendPrint(PrintParams params) async {
-    try {
-      await handler.onDeeplinkSent();
-      await channel.invokeMethod('sendPrint', params.toMap());
-      return true;
-    } catch (e) {
-      await handler.onError(e.toString());
-      return false;
-    }
-  }
+  Future<bool> sendPrint(PrintParams params) =>
+      _invokeOperation('sendPrint', params.toMap());
 
   /// Send reprint deeplink to Stone payment app
-  Future<bool> sendReprint(ReprintParams params) async {
+  Future<bool> sendReprint(ReprintParams params) =>
+      _invokeOperation('sendReprint', params.toMap());
+
+  /// Executa uma operação no nativo. Nunca lança: em caso de erro chama
+  /// [IDeepLinkHandler.onError] e retorna `false`.
+  ///
+  /// O nativo valida a licença antes de abrir o app da Stone; se ela for
+  /// inválida, responde PlatformException(code: 'LICENCE_ERROR').
+  Future<bool> _invokeOperation(String method, Map<String, dynamic> arguments) async {
     try {
+      await channel.invokeMethod(method, arguments);
       await handler.onDeeplinkSent();
-      await channel.invokeMethod('sendReprint', params.toMap());
       return true;
     } catch (e) {
       await handler.onError(e.toString());

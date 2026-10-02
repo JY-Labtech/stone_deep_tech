@@ -1,6 +1,6 @@
 name: stone_deep_tech
 description: Plugin Flutter para integração com Deeplink da Stone para meios de pagamento.
-version: 1.1.0
+version: 1.2.0
 homepage: https://github.com/JY-Labtech/stone_deep_tech
 
 environment:

@@ -2,10 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:stone_deep_tech/stone_deep_tech.dart';
 
-const String _envLicenceKey = '';
+const String _envLicenceKey =
+    String.fromEnvironment('STONE_DEEP_TECH_LICENCE_KEY');
 
-const String _envLicenceInternalKey =
-    'aHR0cHM6Ly9wb3MtcGF5bWVudHMtYXBpLTU3NzQ2NDIzNTQwOC5zb3V0aGFtZXJpY2EtZWFzdDEucnVuLmFwcC9wb3MtcGF5bWVudHMvbGljZW5jZS9jaGVjay9pbnZvaWNl';
+const String _envLicenceInternalKey = String.fromEnvironment(
+  'STONE_DEEP_TECH_LICENCE_INTERNAL_KEY',
+  defaultValue:
+      'aHR0cHM6Ly9wb3J0YWwtYXBpLmp5bGFidGVjaC5jb20uYnIvcG9zLXBheW1lbnRzL2xpY2VuY2UvY2hlY2s=',
+);
 
 void main() {
   runApp(const MyApp());
