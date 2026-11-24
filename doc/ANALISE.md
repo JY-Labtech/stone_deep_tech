@@ -13,7 +13,7 @@ App Flutter
 Android
   └─ StoneDeepTechPlugin (ponte, android/src)  → reflexão → StoneDeepTechNativePlugin (android/libs, pré-compilado)
        ├─ SafeResult              resposta única por chamada
-       ├─ CheckLicenceTech        cache offline (EncryptedLicenceStorage) ou servidor (LicenceProvider)
+       ├─ CheckLicenceTech        servidor (LicenceProvider) na 1ª operação e a cada 4h; cache offline (EncryptedLicenceStorage, até 72h) só se o servidor não responder
        ├─ DeeplinkRequests        MethodCall → DeeplinkRequest (lógica pura)
        ├─ StoneGateway            Intent ACTION_VIEW para o app da Stone (IntentStoneGateway)
        └─ DeeplinkResponseDispatcher   intent de retorno da Stone → Dart (com fila até o Dart estar pronto)
@@ -69,7 +69,14 @@ consiste em abrir os deeplinks `payment-app://pay`, `cancel-app://cancel`, `prin
 | `initDeeplink` delega a `Deeplink.create` | Um só caminho para trocar o handler e reconfigurar a licença, já com tratamento de erro. |
 | `scripts/build_android_aar.sh` aceita `GRADLE_ARGS` | Permite `--no-daemon -Dorg.gradle.jvmargs=-Xmx2g` em máquinas com pouca memória. |
 
-As regras de licença, os nomes de prefs, o formato do cache e a API pública Dart não mudaram.
+As regras de licença, os nomes de prefs, o formato do cache e a API pública Dart não mudaram nessa versão.
+
+**Depois da 1.2.0 (JYN-234, contrato do jylabtech_core):** a primeira validação de cada processo vai ao
+servidor mesmo com cache válido; com cache, revalida a cada 4h; recusa definitiva (4xx exceto 408/429,
+ou 200 com licença inutilizável) apaga o cache e bloqueia na hora; falha temporária (exceção, timeout,
+408/429/5xx, corpo ilegível) usa o cache de no máximo 72h (antes 7 dias) e espera 5 min antes de tentar de
+novo. `validateLicence` é `synchronized`; `validateExistsLicence()` (sem uso em produção) só libera quando
+não há consulta online devida. Nomes de prefs e formato do cache continuam iguais.
 
 ## Testes
 
