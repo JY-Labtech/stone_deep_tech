@@ -123,11 +123,11 @@ O plugin valida a licença no nativo **antes de cada operação** (`sendDeeplink
 
 **Como funciona:**
 
-1. Primeiro verifica se existe uma licença válida armazenada localmente (criptografada), sem usar a rede
-2. Se não existir, consulta o servidor oficial da JY Labtech (em background, com timeout de 15 s, sem travar a interface)
-3. A licença só é aceita se o servidor responder com sucesso e ela estiver dentro da validade (`expiredAt`) e não estiver vencida, inativa nem cancelada
-4. A licença validada fica guardada offline (criptografada) por no máximo 7 dias sem nova consulta, e nunca além do vencimento. O cache é descartado se a chave mudar, se o relógio do aparelho estiver adulterado (data de gravação no futuro) ou se a licença estiver vencida
-5. Depois disso o aparelho precisa de internet para revalidar
+1. A primeira operação depois de abrir o app sempre consulta o servidor oficial da JY Labtech (em background, com timeout de 15 s, sem travar a interface); depois, a licença é consultada de novo a cada **4 horas** de uso. Entre essas consultas a licença salva localmente (criptografada) é usada sem rede
+2. A licença só é aceita se o servidor responder com sucesso e ela estiver dentro da validade (`expiredAt`) e não estiver vencida, inativa nem cancelada
+3. **Bloqueio imediato:** se o servidor recusar a licença (cliente bloqueado no portal, licença vencida, cancelada ou suspensa, não encontrada, aparelho desativado ou limite de aparelhos), a licença salva é apagada e as operações passam a falhar com `LICENCE_ERROR` na hora
+4. **Cache offline:** a licença salva só é usada quando o servidor não responde (sem internet, timeout, 408/429 ou erro 5xx) e por no máximo **72 horas** desde a última validação online, e nunca além do vencimento. Depois de uma falha de rede o plugin espera 5 minutos antes de tentar o servidor de novo. O cache é descartado se a chave mudar, se o relógio do aparelho estiver adulterado (data de gravação no futuro) ou se a licença estiver vencida
+5. Passadas 72 horas sem validação online, o aparelho precisa de internet para revalidar
 6. Se a validação falhar, todas as operações são bloqueadas
 
 ## 🔑 Licença do plugin
@@ -155,7 +155,7 @@ Quando o servidor recusa a licença, a resposta traz `{"message": "..."}`. A men
 | 429 | Muitas consultas em pouco tempo | Aguarde alguns instantes e tente novamente |
 | 5xx | Erro interno do servidor | Tente novamente mais tarde |
 
-Se o corpo da resposta não trouxer `message`, o erro é `Erro ao validar licença (HTTP <código>)`. Sem internet ou em timeout, o erro informa a falha de conexão.
+Se o corpo da resposta não trouxer `message`, o erro é `Erro ao validar licença (HTTP <código>)`. Se trouxer `"reason": "customer_blocked"`, a mensagem é `Cliente bloqueado. Entre em contato com a JY Labtech.`. Recusas (4xx, exceto 408 e 429) apagam a licença salva e bloqueiam na hora. Sem internet, em timeout, 408, 429 ou 5xx, a licença salva nas últimas 72 horas é usada; sem ela, o erro informa a falha de conexão.
 
 ## 📖 Como Usar
 
@@ -681,11 +681,11 @@ if (printResult == PrintResult.printerOutOfPaper) {
 1. Verifique se as chaves estão sendo fornecidas ao chamar `StoneDeepTech.I.initDeeplink`
 2. Confira a `licenceKey` no portal [portal.jylabtech.com.br](https://portal.jylabtech.com.br) e se a licença está ativa e dentro da validade
 3. Não é preciso informar `licenceInternalKey`: a validação sempre vai para o servidor oficial da JY Labtech
-4. Verifique a conexão com a internet (primeira validação e a cada 7 dias)
+4. Verifique a conexão com a internet (primeira operação após abrir o app e a cada 4 horas; sem internet, a operação só funciona se houver uma validação bem-sucedida nas últimas 72 horas)
 5. Veja no Logcat (tag `StoneDeepTechNative`) a mensagem retornada pelo servidor e consulte a tabela de [erros de licença](#erros-de-licença)
 6. Erro 412: o limite de aparelhos foi atingido ou o aparelho foi desativado; ajuste no portal
 7. Trocou de chave ou de plano? Quando a chave muda, a licença salva offline é ignorada e revalidada no servidor
-8. Licença renovada ou reativada no portal? A próxima operação revalida no servidor quando o cache offline não for mais válido (no máximo 7 dias)
+8. Licença renovada ou reativada no portal? Reabra o app: a primeira operação revalida no servidor (com o app aberto, a revalidação acontece a cada 4 horas)
 
 ### Problema: Parcelamento não funciona
 
