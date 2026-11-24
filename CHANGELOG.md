@@ -1,3 +1,11 @@
+## Não lançado
+
+- Licença conforme o contrato do jylabtech_core (JYN-234): o cache offline vale por no máximo 72 horas (antes 7 dias) e só é usado quando o servidor não responde (sem internet, timeout, 408/429, 5xx ou resposta ilegível).
+- A primeira operação depois de abrir o app consulta o servidor, e a licença é revalidada a cada 4 horas de uso. Após uma falha de rede, o plugin espera 5 minutos antes de tentar o servidor de novo (usa o cache nesse intervalo).
+- Recusa do servidor (cliente bloqueado, licença vencida/cancelada/suspensa, não encontrada, aparelho desativado) apaga o cache e bloqueia na hora. Corpo com `"reason": "customer_blocked"` gera a mensagem "Cliente bloqueado. Entre em contato com a JY Labtech.".
+- `CheckLicenceTech.validateExistsLicence()` (atalho só-cache) só devolve `true` quando não há consulta online devida (já validado online nesta execução há menos de 4h, ou servidor fora do ar há menos de 5 min).
+- Os binários `android/libs/stone_deep_tech-native.jar` e `android/libs/stone_deep_tech_native-release.aar` precisam ser regerados (`make build-native` ou `sh scripts/build_android_aar.sh`) na publicação.
+
 ## 1.2.0
 
 Validação de licença mais rígida. Licenças vencidas, suspensas, canceladas ou inativas, que antes podiam passar, agora bloqueiam as operações.
