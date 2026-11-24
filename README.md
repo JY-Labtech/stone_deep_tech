@@ -44,7 +44,7 @@ Adicione o plugin ao seu `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  stone_deep_tech: ^1.2.0
+  stone_deep_tech: ^1.3.0
 ```
 
 Execute:
