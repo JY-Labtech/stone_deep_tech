@@ -1,8 +1,5 @@
 package br.com.jylabtech.stone_deep_tech
 
-import br.com.jylabtech.stone_deep_tech.licence.LicenceConfig
-import br.com.jylabtech.stone_deep_tech.licence.LicenceResult
-import br.com.jylabtech.stone_deep_tech.licence.LicenceRules
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import org.junit.Assert.assertEquals
@@ -11,30 +8,17 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import java.util.concurrent.RejectedExecutionException
 
 class StoneDeepTechNativePluginTest {
 
     private lateinit var plugin: StoneDeepTechNativePlugin
-    private var validatorCalls = 0
-    private var lastKey: String? = null
-    private var lastInternalKey: String? = null
-    private var licenceResponse: LicenceResult? = null
     private val opened = mutableListOf<DeeplinkRequest>()
     private val activitiesStarted get() = opened.size
 
     @Before
     fun setUp() {
         plugin = StoneDeepTechNativePlugin()
-        plugin.backgroundExecutor = { it.run() }
-        plugin.mainThreadExecutor = { it.run() }
         plugin.gateway = StoneGateway { opened += it }
-        plugin.licenceValidator = { key, internalKey ->
-            validatorCalls++
-            lastKey = key
-            lastInternalKey = internalKey
-            licenceResponse
-        }
     }
 
     private fun call(method: String, args: Map<String, Any?>? = emptyMap()): RecordingResult {
@@ -44,16 +28,7 @@ class StoneDeepTechNativePluginTest {
         return result
     }
 
-    private fun configure(internalKey: String? = null): RecordingResult {
-        return call("configureLicence", mapOf("licenceKey" to "test-key", "licenceInternalKey" to internalKey))
-    }
-
-    private fun success(): LicenceResult = LicenceResult().apply { result = LicenceRules.RESULT_SUCCESS }
-
-    private fun configuredWithValidLicence() {
-        configure()
-        licenceResponse = success()
-    }
+    private fun init(): RecordingResult = call("initDeeplink", null)
 
     private val operations = listOf(
         "sendDeeplink" to mapOf<String, Any?>("amount" to 1000, "transactionType" to "DEBIT", "editableAmount" to false),
@@ -62,144 +37,52 @@ class StoneDeepTechNativePluginTest {
         "sendReprint" to mapOf<String, Any?>("atk" to "123", "typeCustomer" to "CLIENT")
     )
 
-    // ---- Licença (gate) ----
+    // ---- Roteamento ----
 
     @Test
-    fun gatedMethodsCoverAllOperations() {
+    fun operationMethodsCoverAllOperations() {
         assertEquals(setOf("sendDeeplink", "sendCancel", "sendPrint", "sendReprint"),
-            StoneDeepTechNativePlugin.GATED_METHODS)
+            StoneDeepTechNativePlugin.OPERATION_METHODS)
     }
 
     @Test
-    fun operationsBeforeConfigureFailWithoutCallingStone() {
-        for ((method, args) in operations) {
-            val result = call(method, args)
-            assertEquals("LICENCE_NOT_CONFIGURED", result.errorCode)
-            assertEquals(1, result.replies)
-        }
-        assertEquals(0, validatorCalls)
-        assertEquals(0, activitiesStarted)
-    }
-
-    @Test
-    fun invalidLicenceBlocksEveryOperation() {
-        configure()
-        licenceResponse = LicenceRules.error("Licença vencida")
-
-        for ((method, args) in operations) {
-            val result = call(method, args)
-            assertEquals(method, "LICENCE_ERROR", result.errorCode)
-            assertEquals("Licença vencida", result.errorMessage)
-            assertTrue(!result.successCalled)
-            assertEquals(1, result.replies)
-        }
-        assertEquals(operations.size, validatorCalls)
-        assertEquals(0, activitiesStarted)
-    }
-
-    @Test
-    fun nullOrDefaultResultBlocksOperation() {
-        configure()
-        licenceResponse = null
-        assertEquals("LICENCE_ERROR", call("sendDeeplink", operations[0].second).errorCode)
-
-        licenceResponse = LicenceResult() // começa como erro
-        val result = call("sendDeeplink", operations[0].second)
-        assertEquals("LICENCE_ERROR", result.errorCode)
-        assertEquals("Sua licença não foi ativada.", result.errorMessage)
-        assertEquals(0, activitiesStarted)
-    }
-
-    @Test
-    fun validatorExceptionBlocksOperation() {
-        configure()
-        plugin.licenceValidator = { _, _ -> throw IllegalStateException("boom") }
-        assertEquals("LICENCE_ERROR", call("sendPrint", operations[2].second).errorCode)
-        assertEquals(0, activitiesStarted)
-    }
-
-    @Test
-    fun withoutValidatorAndContextLicenceIsBlocked() {
-        // Plugin não anexado ao engine (sem CheckLicenceTech) e sem validador: nunca libera.
-        plugin.licenceValidator = null
-        configure()
-        assertEquals("LICENCE_ERROR", call("sendDeeplink", operations[0].second).errorCode)
-        assertEquals(0, activitiesStarted)
-    }
-
-    @Test
-    fun rejectedBackgroundTaskStillReplies() {
-        configure()
-        plugin.backgroundExecutor = { throw RejectedExecutionException("encerrado") }
-        val result = call("sendDeeplink", operations[0].second)
-        assertEquals("LICENCE_ERROR", result.errorCode)
-        assertEquals(1, result.replies)
-        assertEquals(0, activitiesStarted)
-    }
-
-    @Test
-    fun validLicenceRunsOperationAndChecksEveryTime() {
-        configuredWithValidLicence()
-
+    fun everyOperationOpensStoneDirectlyAndRepliesOnce() {
         for ((method, args) in operations) {
             val result = call(method, args)
             assertNull(method, result.errorCode)
             assertEquals(true, result.successValue)
             assertEquals(1, result.replies)
         }
-        assertEquals(operations.size, validatorCalls)
-        assertEquals(operations.size, activitiesStarted)
-
-        // A licença deixa de valer: a próxima operação é bloqueada (não há flag permanente).
-        licenceResponse = LicenceRules.error("Licença cancelada")
-        assertEquals("LICENCE_ERROR", call("sendDeeplink", operations[0].second).errorCode)
         assertEquals(operations.size, activitiesStarted)
     }
 
     @Test
-    fun configureWithoutInternalKeyUsesCore() {
-        assertEquals(true, configure(null).successValue)
-        licenceResponse = success()
-        call("sendDeeplink", operations[0].second)
-        assertEquals("test-key", lastKey)
-        assertEquals(LicenceConfig.LICENCE_CHECK_URL, lastInternalKey)
+    fun operationsDoNotRequireInit() {
+        // initDeeplink só entrega respostas pendentes; não é pré-requisito das operações.
+        assertEquals(true, call("sendDeeplink", operations[0].second).successValue)
+        assertEquals(1, activitiesStarted)
     }
 
     @Test
-    fun configurePassesTrimmedKeysToValidator() {
-        call("configureLicence", mapOf("licenceKey" to "  test-key  ", "licenceInternalKey" to "  custom  "))
-        licenceResponse = success()
-        call("sendCancel", operations[1].second)
-        assertEquals("test-key", lastKey)
-        assertEquals("custom", lastInternalKey)
+    fun initRepliesSuccessOnce() {
+        val result = init()
+        assertEquals(true, result.successValue)
+        assertEquals(1, result.replies)
+        assertEquals(0, activitiesStarted)
     }
 
     @Test
-    fun configureRequiresLicenceKey() {
-        val result = call("configureLicence", mapOf("licenceKey" to "  "))
-        assertEquals("INVALID_ARGUMENT", result.errorCode)
-    }
-
-    @Test
-    fun configureWithNonStringKeyIsInvalidArgument() {
-        assertEquals("INVALID_ARGUMENT", call("configureLicence", mapOf("licenceKey" to 123)).errorCode)
-        assertEquals("INVALID_ARGUMENT", call("configureLicence", null).errorCode)
-    }
-
-    @Test
-    fun unknownMethodIsNotImplementedWithoutValidation() {
-        configure()
+    fun unknownMethodIsNotImplemented() {
         val result = call("unknown")
         assertTrue(result.notImplementedCalled)
         assertEquals(1, result.replies)
-        assertEquals(0, validatorCalls)
+        assertEquals(0, activitiesStarted)
     }
 
     // ---- Caso de uso certo com os argumentos certos ----
 
     @Test
     fun sendDeeplinkOpensPaymentWithArguments() {
-        configuredWithValidLicence()
         call("sendDeeplink", mapOf(
             "amount" to 1550, "editableAmount" to true, "transactionType" to "CREDIT",
             "installmentCount" to 3, "installmentType" to "MERCHANT", "orderId" to 42,
@@ -218,7 +101,6 @@ class StoneDeepTechNativePluginTest {
     @Test
     fun sendDeeplinkAcceptsLongValuesFromDart() {
         // Dart envia int > 2^31 como Long; antes virava ClassCastException ("ERROR").
-        configuredWithValidLicence()
         val result = call("sendDeeplink", mapOf(
             "amount" to 3_000_000_000L, "orderId" to 1_727_000_000_000L, "returnScheme" to "app"
         ))
@@ -229,7 +111,6 @@ class StoneDeepTechNativePluginTest {
 
     @Test
     fun sendCancelOpensCancelWithArguments() {
-        configuredWithValidLicence()
         call("sendCancel", mapOf("returnScheme" to "meuapp", "atk" to "ATK1", "amount" to 500, "editableAmount" to true))
         val request = opened.single()
         assertEquals("cancel-app", request.scheme)
@@ -241,7 +122,6 @@ class StoneDeepTechNativePluginTest {
 
     @Test
     fun sendPrintOpensPrinterWithArguments() {
-        configuredWithValidLicence()
         call("sendPrint", mapOf(
             "schemeReturn" to "meuapp", "printableContent" to "[{\"type\":\"line\",\"content\":\"x\"}]",
             "showFeedbackScreen" to false
@@ -258,7 +138,6 @@ class StoneDeepTechNativePluginTest {
 
     @Test
     fun sendReprintOpensReprinterWithArguments() {
-        configuredWithValidLicence()
         call("sendReprint", mapOf(
             "schemeReturn" to "meuapp", "atk" to "ATK2", "typeCustomer" to "MERCHANT", "showFeedbackScreen" to true
         ))
@@ -275,7 +154,6 @@ class StoneDeepTechNativePluginTest {
 
     @Test
     fun gatewayFailureRepliesErrorOnce() {
-        configuredWithValidLicence()
         plugin.gateway = StoneGateway { throw IllegalStateException("No Activity found to handle Intent") }
         for ((method, args) in operations) {
             val result = call(method, args)
@@ -288,14 +166,12 @@ class StoneDeepTechNativePluginTest {
 
     @Test
     fun gatewayFailureWithoutMessageUsesExceptionName() {
-        configuredWithValidLicence()
         plugin.gateway = StoneGateway { throw UnsupportedOperationException() }
         assertEquals("UnsupportedOperationException", call("sendPrint", operations[2].second).errorMessage)
     }
 
     @Test
     fun wrongArgumentTypeRepliesErrorWithoutOpeningStone() {
-        configuredWithValidLicence()
         val result = call("sendDeeplink", mapOf("amount" to "1000", "returnScheme" to "app"))
         assertEquals("ERROR", result.errorCode)
         assertTrue(result.errorMessage!!.contains("amount"))
@@ -306,25 +182,10 @@ class StoneDeepTechNativePluginTest {
     fun defaultGatewayWithoutEngineRepliesErrorInsteadOfFalseSuccess() {
         // Antes: context nulo -> startActivity ignorado e success(true). Agora: erro explícito.
         val detached = StoneDeepTechNativePlugin()
-        detached.backgroundExecutor = { it.run() }
-        detached.mainThreadExecutor = { it.run() }
-        detached.licenceValidator = { _, _ -> success() }
-        detached.onMethodCall(MethodCall("configureLicence", mapOf("licenceKey" to "k")), RecordingResult())
-
         val result = RecordingResult()
         detached.onMethodCall(MethodCall("sendDeeplink", mapOf("amount" to 1)), result)
         assertEquals("ERROR", result.errorCode)
         assertEquals(1, result.replies)
-    }
-
-    @Test
-    fun nativeNeverRepliesTwiceEvenIfOperationTriesTo() {
-        configuredWithValidLicence()
-        // Simula um caminho que respondesse duas vezes: o SafeResult ignora a segunda.
-        plugin.mainThreadExecutor = { task -> task.run(); task.run() }
-        val result = call("sendDeeplink", operations[0].second)
-        assertEquals(1, result.replies)
-        assertEquals(true, result.successValue)
     }
 
     // ---- Respostas da Stone para o Dart ----
@@ -342,7 +203,7 @@ class StoneDeepTechNativePluginTest {
     }
 
     @Test
-    fun responseBeforeDartHandlerIsDeliveredAfterConfigureLicence() {
+    fun responseBeforeDartHandlerIsDeliveredAfterInit() {
         var dartReady = false
         val delivered = mutableListOf<Any?>()
         plugin.responseSender = { _, args, callback ->
@@ -354,7 +215,7 @@ class StoneDeepTechNativePluginTest {
         assertTrue(delivered.isEmpty())
 
         dartReady = true
-        configure()
+        assertEquals(true, init().successValue)
         assertEquals(listOf<Any?>("meuapp://print?result=SUCCESS"), delivered)
         assertEquals(0, plugin.responseDispatcher.pendingCount)
     }
@@ -388,7 +249,6 @@ class StoneDeepTechNativePluginTest {
     @Test
     fun viewIntentOfOtherSchemeIsIgnoredAndNotConsumed() {
         val delivered = recordingSender()
-        configuredWithValidLicence()
         call("sendDeeplink", mapOf("amount" to 1, "returnScheme" to "meuapp"))
 
         assertFalse(deliver(FakeIntent(VIEW, "https://loja.com/produto/1")))
@@ -408,7 +268,6 @@ class StoneDeepTechNativePluginTest {
     @Test
     fun stoneResponseWithSentReturnSchemeIsConsumedAndDelivered() {
         val delivered = recordingSender()
-        configuredWithValidLicence()
         call("sendDeeplink", mapOf("amount" to 1, "returnScheme" to "MeuApp"))
 
         val intent = FakeIntent(VIEW, "meuapp://pay?code=0&atk=1")
@@ -420,7 +279,6 @@ class StoneDeepTechNativePluginTest {
     @Test
     fun everyOperationRegistersItsReturnScheme() {
         val delivered = recordingSender()
-        configuredWithValidLicence()
         call("sendCancel", mapOf("atk" to "1", "returnScheme" to "cancelapp"))
         call("sendPrint", mapOf("printableContent" to "[]", "schemeReturn" to "printapp"))
         call("sendReprint", mapOf("atk" to "1", "typeCustomer" to "CLIENT", "schemeReturn" to "reprintapp"))
@@ -434,7 +292,6 @@ class StoneDeepTechNativePluginTest {
     @Test
     fun recreatedActivityWithSameIntentDoesNotRedeliver() {
         val delivered = recordingSender()
-        configuredWithValidLicence()
         call("sendPrint", mapOf("printableContent" to "[]", "schemeReturn" to "meuapp"))
 
         val launchIntent = FakeIntent(VIEW, "meuapp://print?result=SUCCESS")
@@ -449,7 +306,6 @@ class StoneDeepTechNativePluginTest {
     fun distinctIntentsWithSameUriAreBothDelivered() {
         // Duas impressões seguidas com o mesmo resultado são respostas legítimas distintas.
         val delivered = recordingSender()
-        configuredWithValidLicence()
         call("sendPrint", mapOf("printableContent" to "[]", "schemeReturn" to "meuapp"))
 
         assertTrue(deliver(FakeIntent(VIEW, "meuapp://print?result=SUCCESS")))
@@ -460,7 +316,6 @@ class StoneDeepTechNativePluginTest {
     @Test
     fun markFailureStillDeliversOnce() {
         val delivered = recordingSender()
-        configuredWithValidLicence()
         call("sendDeeplink", mapOf("amount" to 1, "returnScheme" to "meuapp"))
         assertTrue(plugin.handleIntent(VIEW, "meuapp://pay?code=0", { false }, { throw UnsupportedOperationException() }))
         assertEquals(1, delivered.size)
@@ -469,7 +324,6 @@ class StoneDeepTechNativePluginTest {
     @Test
     fun failedOperationStillRecognisesReturnScheme() {
         // O scheme é registrado antes de abrir; mesmo se a abertura falhar, não há efeito colateral.
-        configuredWithValidLicence()
         plugin.gateway = StoneGateway { throw IllegalStateException("sem app") }
         call("sendDeeplink", mapOf("amount" to 1, "returnScheme" to "meuapp"))
         assertTrue(plugin.returnSchemes.contains("meuapp"))

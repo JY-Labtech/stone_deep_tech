@@ -2,9 +2,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stone_deep_tech/stone_deep_tech.dart';
 
-/// Chave fictícia usada só nos testes.
-const _testLicenceKey = 'test-licence-key-0000';
-
 class _RecordingHandler implements IDeepLinkHandler {
   final List<String> errors = [];
   final List<String> responses = [];
@@ -32,17 +29,17 @@ void main() {
   /// Erro devolvido pelo nativo nas operações (null = sucesso).
   Object? operationError;
 
-  /// Erro devolvido pelo nativo no configureLicence (null = sucesso).
-  Object? configureError;
+  /// Erro devolvido pelo nativo no initDeeplink (null = sucesso).
+  Object? initError;
 
   setUp(() {
     calls.clear();
     operationError = null;
-    configureError = null;
+    initError = null;
     messenger.setMockMethodCallHandler(channel, (call) async {
       calls.add(call);
-      if (call.method == 'configureLicence') {
-        if (configureError != null) throw configureError!;
+      if (call.method == 'initDeeplink') {
+        if (initError != null) throw initError!;
         return true;
       }
       if (operationError != null) throw operationError!;
@@ -53,7 +50,7 @@ void main() {
   tearDown(() => messenger.setMockMethodCallHandler(channel, null));
 
   Future<Deeplink> init(_RecordingHandler handler) async {
-    final deeplink = StoneDeepTech(channel).initDeeplink(handler: handler, licenceKey: _testLicenceKey);
+    final deeplink = StoneDeepTech(channel).initDeeplink(handler: handler);
     await pumpEventQueue();
     calls.clear();
     return deeplink;
@@ -74,63 +71,52 @@ void main() {
     test('I é singleton e usa o canal stone_deep_tech', () {
       expect(identical(StoneDeepTech.I, StoneDeepTech.I), isTrue);
       expect(StoneDeepTech.channelName, 'stone_deep_tech');
-      expect(CHANNEL_NAME, StoneDeepTech.channelName);
-      expect(USER_REFERENCE, 'SMARTPOS');
     });
 
-    test('initDeeplink de novo troca o handler e reconfigura a licença', () async {
+    test('initDeeplink de novo troca o handler e avisa o nativo de novo', () async {
       final first = _RecordingHandler();
       final second = _RecordingHandler();
       final plugin = StoneDeepTech(channel);
-      final d1 = plugin.initDeeplink(handler: first, licenceKey: _testLicenceKey);
-      final d2 = plugin.initDeeplink(handler: second, licenceKey: 'outra-chave');
+      final d1 = plugin.initDeeplink(handler: first);
+      final d2 = plugin.initDeeplink(handler: second);
       await pumpEventQueue();
 
       expect(identical(d1, d2), isTrue);
       expect(identical(plugin.deeplink, d2), isTrue);
       expect(d2.handler, same(second));
-      final configures = calls.where((c) => c.method == 'configureLicence').toList();
-      expect(configures, hasLength(2));
-      expect((configures.last.arguments as Map)['licenceKey'], 'outra-chave');
+      expect(calls.where((c) => c.method == 'initDeeplink'), hasLength(2));
     });
 
-    test('falha do nativo no configureLicence vai para onError (sem erro não tratado)', () async {
-      configureError = PlatformException(code: 'INVALID_ARGUMENT', message: 'licenceKey é obrigatório');
+    test('resposta pendente entregue após o initDeeplink chega ao handler novo', () async {
+      // O nativo responde ao initDeeplink e reenvia as respostas do cold start.
+      final first = _RecordingHandler();
+      final second = _RecordingHandler();
+      final plugin = StoneDeepTech(channel);
+      plugin.initDeeplink(handler: first);
+      plugin.initDeeplink(handler: second);
+      await pumpEventQueue();
+      await nativeCalls('onDeeplinkResponse', 'meuapp://pay?code=0');
+
+      expect(first.responses, isEmpty);
+      expect(second.responses, ['meuapp://pay?code=0']);
+    });
+
+    test('falha do nativo no initDeeplink vai para onError (sem erro não tratado)', () async {
+      initError = PlatformException(code: 'ERROR', message: 'falhou');
       final handler = _RecordingHandler();
-      StoneDeepTech(channel).initDeeplink(handler: handler, licenceKey: _testLicenceKey);
+      StoneDeepTech(channel).initDeeplink(handler: handler);
       await pumpEventQueue();
 
-      expect(handler.errors.single, contains('INVALID_ARGUMENT'));
+      expect(handler.errors.single, contains('falhou'));
     });
 
-    test('MissingPluginException no configureLicence também vai para onError', () async {
-      configureError = MissingPluginException('sem nativo');
+    test('MissingPluginException no initDeeplink também vai para onError', () async {
+      initError = MissingPluginException('sem nativo');
       final handler = _RecordingHandler();
-      StoneDeepTech(channel).initDeeplink(handler: handler, licenceKey: _testLicenceKey);
+      StoneDeepTech(channel).initDeeplink(handler: handler);
       await pumpEventQueue();
 
       expect(handler.errors.single, contains('MissingPluginException'));
-    });
-  });
-
-  group('Deeplink.updateLicence', () {
-    test('envia as chaves aparadas e propaga o erro do nativo para quem aguarda', () async {
-      final deeplink = await init(_RecordingHandler());
-
-      await deeplink.updateLicence(licenceKey: '  k2  ', licenceInternalKey: '  url  ');
-      expect(single('configureLicence').arguments, {'licenceKey': 'k2', 'licenceInternalKey': 'url'});
-
-      configureError = PlatformException(code: 'INVALID_ARGUMENT');
-      await expectLater(
-        deeplink.updateLicence(licenceKey: 'k3'),
-        throwsA(isA<PlatformException>().having((e) => e.code, 'code', 'INVALID_ARGUMENT')),
-      );
-    });
-
-    test('licenceKey vazio lança ArgumentError sem chamar o nativo', () async {
-      final deeplink = await init(_RecordingHandler());
-      expect(() => deeplink.updateLicence(licenceKey: ' '), throwsArgumentError);
-      expect(calls, isEmpty);
     });
   });
 
@@ -269,16 +255,6 @@ void main() {
         expect(await entry.value(deeplink), isFalse);
         expect(handler.sentCount, 0);
         expect(handler.errors.single, contains('No Activity found'));
-      });
-
-      test('${entry.key}: LICENCE_ERROR retorna false (sem sucesso indevido)', () async {
-        final handler = _RecordingHandler();
-        final deeplink = await init(handler);
-        operationError = PlatformException(code: 'LICENCE_ERROR', message: 'Licença vencida');
-
-        expect(await entry.value(deeplink), isFalse);
-        expect(handler.sentCount, 0);
-        expect(handler.errors.single, allOf(contains('LICENCE_ERROR'), contains('Licença vencida')));
       });
 
       test('${entry.key}: MissingPluginException retorna false', () async {

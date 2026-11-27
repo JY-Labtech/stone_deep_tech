@@ -1,72 +1,93 @@
 # Stone Deep Tech
 
+> Flutter plugin for Stone Smart POS terminals via deeplink: payments, cancellation, custom printing and receipt reprint on Android. Open source (MIT).
+
+[![pub package](https://img.shields.io/pub/v/stone_deep_tech.svg)](https://pub.dev/packages/stone_deep_tech)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 <div align="center">
-  <img src="assets/stone deep tech.png" alt="Stone" height="300" />
+  <img src="assets/stone deep tech.png" alt="Stone Deep Tech" height="300" />
 </div>
 
-</br>
+Plugin Flutter para integrar apps às maquininhas **Stone Smart POS** pelo sistema de **deeplinks** da Stone: pagamento, cancelamento, impressão customizada e reimpressão de comprovantes, sem escrever código nativo.
 
-## 🚨 Aviso
+O plugin não usa o SDK da Stone. Ele abre os apps da Stone já instalados na maquininha (`payment-app://pay`, `cancel-app://cancel`, `printer-app://print`, `reprinter-app://reprint`) e devolve ao seu app a URI de retorno que a Stone envia ao terminar.
 
-> **Este plugin é _não oficial_** e foi desenvolvido de forma independente para facilitar a integração de pagamentos via Deeplink da Stone em dispositivos Android Smart POS.
+> **Plugin não oficial.** Foi desenvolvido de forma independente pela JY Labtech e não tem vínculo com a Stone.
 
----
+## Sumário
 
-Plugin Flutter para integração com o sistema de Deeplinks da Stone para meios de pagamento, impressão e reimpressão de comprovantes.
+- [Funcionalidades](#funcionalidades)
+- [Maquininhas compatíveis e requisitos](#maquininhas-compatíveis-e-requisitos)
+- [Instalação](#instalação)
+- [Configuração Android](#configuração-android)
+- [Uso rápido](#uso-rápido)
+- [Referência da API](#referência-da-api)
+- [Exemplos por operação](#exemplos-por-operação)
+- [Tratamento de erros](#tratamento-de-erros)
+- [App de exemplo](#app-de-exemplo)
+- [Testes](#testes)
+- [Migração da 1.x para a 2.0](#migração-da-1x-para-a-20)
+- [Contribuindo](#contribuindo)
+- [Licença](#licença)
+- [Créditos](#créditos)
 
-## 📋 Descrição
+## Funcionalidades
 
-O **Stone Deep Tech** é um plugin Flutter que permite que desenvolvedores integrem seus aplicativos com o sistema de pagamento da Stone através de deeplinks, sem precisar lidar diretamente com código nativo Android. O plugin oferece uma interface simples e intuitiva para realizar operações de pagamento, cancelamento, impressão customizada e reimpressão de comprovantes.
+- **Pagamento** (`sendDeeplink`): débito, crédito à vista, crédito parcelado (lojista ou emissor), voucher, PIX e pagamento instantâneo, com valor fixo ou editável e `orderId` opcional.
+- **Cancelamento** (`sendCancel`): cancela uma transação pelo `atk`, com valor total ou parcial.
+- **Impressão customizada** (`sendPrint`): texto com alinhamento e tamanho, linhas simples e imagens em Base64.
+- **Reimpressão** (`sendReprint`): segunda via do comprovante do cliente ou do lojista.
+- **Retorno da Stone** (`IDeepLinkHandler.onDeeplinkResponse`): a URI de resposta chega ao seu handler, inclusive quando o app é aberto a frio pela resposta (ela é guardada até o `initDeeplink`).
+- **Leitura do resultado de impressão** (`PrintResult`, `DeeplinkResponseParser`).
+- Os métodos nunca lançam exceção: retornam `true`/`false` e entregam o erro em `onError`.
 
-> A implementação nativa Android é distribuída como um binário privado embarcado no plugin. Nenhum passo adicional de build é necessário para consumidores.
+## Maquininhas compatíveis e requisitos
 
-## ✨ Funcionalidades
+| Item | Requisito |
+| --- | --- |
+| Maquininha | Stone Smart POS com os apps da Stone que atendem os deeplinks de pagamento, cancelamento, impressão e reimpressão |
+| Android | `minSdk` 24 (Android 7.0) |
+| Dart | `>=3.9.2` |
+| Flutter | versão com Dart 3.9 ou superior (Flutter 3.35+) |
+| App do fabricante | App de pagamento da Stone instalado e ativado no terminal |
+| Permissões | Nenhuma permissão extra. O plugin não acessa a internet |
+| Repositório Maven | Nenhum. O plugin não depende do SDK nem do PackageCloud da Stone |
 
-- ✅ **Pagamento**: Envio de deeplinks para processamento de pagamentos
-- ✅ **Cancelamento**: Cancelamento de transações através de deeplink
-- ✅ **Impressão Customizada**: Impressão de conteúdo personalizado (texto, linhas, imagens)
-- ✅ **Reimpressão**: Reimpressão de comprovantes de transações anteriores
-- ✅ **Validação de Licença**: Sistema integrado de validação de licença
-- ✅ **Callbacks Assíncronos**: Recebimento de respostas de forma assíncrona
-- ✅ **Type Safety**: Enums para maior segurança de tipos
-- ✅ **Suporte Completo**: DEBIT, CREDIT, VOUCHER, INSTANT_PAYMENT e PIX
+Só Android é suportado.
 
-## 📦 Requisitos
+## Instalação
 
-- Dart SDK: >=3.9.2 (Flutter compatível)
-- Android: SDK mínimo 24 (Android 7.0)
-- Aplicativo Stone instalado no dispositivo
-- Licença do plugin ativa (veja [Licença do plugin](#-licença-do-plugin))
+```bash
+flutter pub add stone_deep_tech
+```
 
-## 🚀 Instalação
-
-Adicione o plugin ao seu `pubspec.yaml`:
+Ou no `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  stone_deep_tech: ^1.3.0
+  stone_deep_tech: ^2.0.0
 ```
 
-Execute:
+## Configuração Android
 
-```bash
-flutter pub get
-```
+### 1. Intent filter de retorno
 
-## ⚙️ Configuração Android
-
-### 1. Configurar o AndroidManifest.xml
-
-Adicione o `intent-filter` necessário para receber respostas de deeplink no seu `AndroidManifest.xml`:
+A Stone devolve o resultado abrindo o seu app com um `ACTION_VIEW` no scheme que você informar em `returnScheme`/`schemeReturn`. Declare esse scheme na Activity principal (`android/app/src/main/AndroidManifest.xml`):
 
 ```xml
 <activity
     android:name=".MainActivity"
+    android:exported="true"
     android:launchMode="singleTop"
     ...>
-    <!-- ... outros intent-filters ... -->
 
-    <!-- Intent filter para receber respostas de deeplink da Stone -->
+    <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+    </intent-filter>
+
+    <!-- Retorno dos deeplinks da Stone -->
     <intent-filter>
         <action android:name="android.intent.action.VIEW" />
         <category android:name="android.intent.category.DEFAULT" />
@@ -78,471 +99,85 @@ Adicione o `intent-filter` necessário para receber respostas de deeplink no seu
 </activity>
 ```
 
-**Importante**: O `launchMode="singleTop"` é necessário para garantir que o app não crie múltiplas instâncias ao receber deeplinks.
+Use `launchMode="singleTop"`: assim a resposta chega por `onNewIntent` na mesma Activity, sem abrir outra instância do app.
 
-### 2. Configurar o Scheme de Retorno
+### 2. Scheme de retorno
 
-Crie ou atualize o arquivo `res/values/strings.xml`:
+Em `android/app/src/main/res/values/strings.xml`:
 
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="return_scheme">seu_app_scheme</string>
+    <string name="return_scheme">meuapp</string>
 </resources>
 ```
 
-Substitua `seu_app_scheme` pelo scheme único do seu aplicativo (ex: `meuapp`, `stone_deep_tech_example`).
+Use um scheme exclusivo para a Stone e passe o mesmo valor em `returnScheme` (pagamento e cancelamento) ou `schemeReturn` (impressão e reimpressão). O plugin só trata como resposta da Stone, e só consome, um `ACTION_VIEW` com um scheme que ele já enviou à Stone (sem diferenciar maiúsculas de minúsculas). Os outros deeplinks do seu app seguem o caminho normal.
 
-### 3. Configurar a Chave de Licença
+Não há flavors, credenciais nem `local.properties` para configurar.
 
-A chave de licença é enviada pelo código Dart ao inicializar o plugin:
-
-```dart
-StoneDeepTech.I.initDeeplink(
-  handler: handler,
-  licenceKey: const String.fromEnvironment('STONE_DEEP_TECH_LICENCE_KEY'),
-);
-```
-
-- `licenceKey` (obrigatório): a chave da sua licença, copiada do portal [portal.jylabtech.com.br](https://portal.jylabtech.com.br).
-- `licenceInternalKey` (opcional): o padrão é a constante `licenceCheck` exportada pelo plugin (base64 de `https://licence-server.invalid/pos-payments/licence/check`). Não é preciso informar.
-
-> **A validação acontece sempre no servidor oficial da JY Labtech** (`https://licence-server.invalid/pos-payments/licence/check`). O `licenceInternalKey` só é aceito se apontar para esse servidor (https, host `licence-server.invalid`, caminho `/pos-payments/licence/check...`), em texto puro ou base64. Qualquer outro valor é ignorado e o servidor oficial é usado, inclusive o valor antigo (`***REMOVIDO***...`), outros hosts e URLs sem TLS.
-
-Sugerimos definir a chave com `--dart-define` (ou outro mecanismo seguro) ao executar seu app:
-
-```bash
-flutter run --dart-define STONE_DEEP_TECH_LICENCE_KEY="sua_chave_aqui"
-```
-
-Alternativamente, armazene a chave em um serviço seguro (ex.: vault, remote config) e só então invoque `initDeeplink`. Para trocar a chave depois da inicialização, use `StoneDeepTech.I.deeplink.updateLicence(licenceKey: ...)`.
-
-### 4. Validação de Licença
-
-O plugin valida a licença no nativo **antes de cada operação** (`sendDeeplink`, `sendCancel`, `sendPrint`, `sendReprint`). O app da Stone só é aberto se a licença for válida e ativa. Se a licença for inválida, vencida, suspensa, cancelada, inativa ou não puder ser validada, a operação é bloqueada com o código `LICENCE_ERROR` (ou `LICENCE_NOT_CONFIGURED` se a chave não foi informada), entregue em `IDeepLinkHandler.onError`, e o método retorna `false`. Nesse caso `onDeeplinkSent` não é chamado.
-
-**Como funciona:**
-
-1. A primeira operação depois de abrir o app sempre consulta o servidor oficial da JY Labtech (em background, com timeout de 15 s, sem travar a interface); depois, a licença é consultada de novo a cada **4 horas** de uso. Entre essas consultas a licença salva localmente (criptografada) é usada sem rede
-2. A licença só é aceita se o servidor responder com sucesso e ela estiver dentro da validade (`expiredAt`) e não estiver vencida, inativa nem cancelada
-3. **Bloqueio imediato:** se o servidor recusar a licença (cliente bloqueado no portal, licença vencida, cancelada ou suspensa, não encontrada, aparelho desativado ou limite de aparelhos), a licença salva é apagada e as operações passam a falhar com `LICENCE_ERROR` na hora
-4. **Cache offline:** a licença salva só é usada quando o servidor não responde (sem internet, timeout, 408/429 ou erro 5xx) e por no máximo **72 horas** desde a última validação online, e nunca além do vencimento. Depois de uma falha de rede o plugin espera 5 minutos antes de tentar o servidor de novo. O cache é descartado se a chave mudar, se o relógio do aparelho estiver adulterado (data de gravação no futuro) ou se a licença estiver vencida
-5. Passadas 72 horas sem validação online, o aparelho precisa de internet para revalidar
-6. Se a validação falhar, todas as operações são bloqueadas
-
-## 🔑 Licença do plugin
-
-- **Onde adquirir:** crie sua conta ou entre no portal [portal.jylabtech.com.br](https://portal.jylabtech.com.br). Quem já tinha conta no portal antigo entra com o mesmo e-mail e a mesma senha.
-- **Produto:** "Licença plugin de pagamento". Uma mesma licença vale para qualquer plugin de pagamento da JY Labtech.
-- **Planos:**
-  - `debug`: cortesia concedida automaticamente no autocadastro, válida por 365 dias e limitada a 2 aparelhos. Ideal para desenvolvimento e testes.
-  - `mensal`: cobrado por dispositivo.
-- **Limite por dispositivo:** cada aparelho que valida a licença ocupa uma vaga. O aparelho é identificado principalmente pelo ANDROID_ID. Aparelhos podem ser consultados e desativados no portal; um aparelho desativado fica bloqueado.
-- **Chaves existentes continuam valendo:** as chaves emitidas antes da migração para o novo portal não mudaram. Chaves novas no formato `JYL-...` também funcionam.
-- **Migração do `licenceInternalKey`:** a partir da 1.2.0 o parâmetro é opcional e pode ser removido. O valor antigo (que começa com `***REMOVIDO***...`) não aponta mais para o servidor antigo: ele é ignorado e a validação vai para o servidor oficial.
-
-### Erros de licença
-
-Quando o servidor recusa a licença, a resposta traz `{"message": "..."}`. A mensagem é registrada no Logcat (tag `StoneDeepTechNative`, "Erro na validação de licença: ...") e a operação retorna `LICENCE_ERROR`.
-
-| HTTP | Significado | O que fazer |
-| ---- | ----------- | ----------- |
-| 404 | Licença não encontrada | Confira a `licenceKey` copiada do portal |
-| 412 | Limite de aparelhos atingido ou aparelho desativado | Libere/reative o aparelho no portal ou contrate mais dispositivos |
-| 428 | Licença vencida, suspensa ou cancelada | Renove ou regularize o pagamento no portal |
-| 403 | Requisição sem chave | Informe `licenceKey` em `initDeeplink` |
-| 400 | Aparelho sem identificador estável | Verifique se o aparelho fornece ANDROID_ID |
-| 429 | Muitas consultas em pouco tempo | Aguarde alguns instantes e tente novamente |
-| 5xx | Erro interno do servidor | Tente novamente mais tarde |
-
-Se o corpo da resposta não trouxer `message`, o erro é `Erro ao validar licença (HTTP <código>)`. Se trouxer `"reason": "customer_blocked"`, a mensagem é `Cliente bloqueado. Entre em contato com a JY Labtech.`. Recusas (4xx, exceto 408 e 429) apagam a licença salva e bloqueiam na hora. Sem internet, em timeout, 408, 429 ou 5xx, a licença salva nas últimas 72 horas é usada; sem ela, o erro informa a falha de conexão.
-
-## 📖 Como Usar
-
-### 1. Inicializar o Plugin
-
-Primeiro, crie um handler para receber os callbacks:
-
-```dart
-import 'package:stone_deep_tech/stone_deep_tech.dart';
-
-class MyDeepLinkHandler implements IDeepLinkHandler {
-  @override
-  Future<void> onDeeplinkResponse(String responseUri) async {
-    print('Resposta recebida: $responseUri');
-    // Processe a resposta aqui
-    // Exemplo: extrair código de resultado, ATK, etc.
-  }
-
-  @override
-  Future<void> onError(String message) async {
-    print('Erro: $message');
-    // Trate erros aqui
-  }
-
-  @override
-  Future<void> onDeeplinkSent() async {
-    print('Deeplink enviado com sucesso');
-  }
-}
-
-// Inicialize o plugin
-final handler = MyDeepLinkHandler();
-StoneDeepTech.I.initDeeplink(
-  handler: handler,
-  licenceKey: 'SUA_CHAVE',
-);
-```
-
-### 2. Enviar Pagamento
-
-```dart
-import 'package:stone_deep_tech/stone_deep_tech.dart';
-
-final params = DeeplinkParams(
-  amount: 10000, // R$ 100,00 em centavos
-  editableAmount: false, // Não permite editar valor (padrão)
-  transactionType: TransactionType.debit, // DEBIT, CREDIT, VOUCHER, INSTANT_PAYMENT, PIX
-  returnScheme: 'seu_app_scheme', // Deve corresponder ao strings.xml
-  // Parâmetros opcionais:
-  installmentCount: 3, // Número de parcelas (2 a 99)
-  installmentType: InstallmentType.merchant, // MERCHANT, ISSUER, ou NONE
-  orderId: 12345, // ID do pedido
-);
-
-final success = await StoneDeepTech.I.deeplink.sendDeeplink(params);
-if (success) {
-  print('Deeplink de pagamento enviado!');
-} else {
-  print('Erro ao enviar deeplink');
-}
-```
-
-**Nota**: O campo `installmentType` só é enviado quando `transactionType` é `credit`.
-
-### 3. Cancelar Transação
-
-```dart
-import 'package:stone_deep_tech/stone_deep_tech.dart';
-
-final cancelParams = CancelParams(
-  returnScheme: 'seu_app_scheme',
-  atk: 'codigo_atk_da_transacao', // Código único da transação gerado pelo autorizador
-  amount: 10000, // Valor em centavos (opcional)
-  editableAmount: false, // Não permite editar valor (padrão)
-);
-
-final success = await StoneDeepTech.I.deeplink.sendCancel(cancelParams);
-if (success) {
-  print('Deeplink de cancelamento enviado!');
-}
-```
-
-### 4. Impressão Customizada
-
-```dart
-import 'package:stone_deep_tech/stone_deep_tech.dart';
-import 'dart:convert';
-
-// Criar conteúdo de impressão
-final printContent = [
-  // Texto customizado
-  TextPrintContent(
-    content: 'LOJA EXEMPLO',
-    align: PrintTextAlign.center,
-    size: PrintTextSize.big,
-  ),
-
-  // Linha simples
-  LinePrintContent(content: '--------------------------------'),
-
-  // Texto alinhado à esquerda
-  TextPrintContent(
-    content: 'Produto: Item 1',
-    align: PrintTextAlign.left,
-    size: PrintTextSize.small,
-  ),
-
-  // Texto alinhado à direita
-  TextPrintContent(
-    content: 'R\$ 100,00',
-    align: PrintTextAlign.right,
-    size: PrintTextSize.medium,
-  ),
-
-  // Imagem (Base64)
-  ImagePrintContent(
-    imagePath: 'iVBORw0KGgoAAAANSUhEUgAA...', // String Base64
-  ),
-];
-
-final printParams = PrintParams(
-  schemeReturn: 'seu_app_scheme',
-  printableContent: printContent,
-  showFeedbackScreen: true, // Mostrar tela de sucesso/erro
-);
-
-final success = await StoneDeepTech.I.deeplink.sendPrint(printParams);
-if (success) {
-  print('Deeplink de impressão enviado!');
-}
-```
-
-### 5. Reimpressão de Comprovante
-
-```dart
-import 'package:stone_deep_tech/stone_deep_tech.dart';
-
-final reprintParams = ReprintParams(
-  schemeReturn: 'seu_app_scheme',
-  atk: 'codigo_atk_da_transacao', // Código único da transação
-  typeCustomer: TypeCustomer.client, // CLIENT ou MERCHANT
-  showFeedbackScreen: true, // Mostrar tela de sucesso/erro
-);
-
-final success = await StoneDeepTech.I.deeplink.sendReprint(reprintParams);
-if (success) {
-  print('Deeplink de reimpressão enviado!');
-}
-```
-
-### 6. Processar Resultados de Impressão
-
-```dart
-import 'package:stone_deep_tech/stone_deep_tech.dart';
-
-class MyDeepLinkHandler implements IDeepLinkHandler {
-  @override
-  Future<void> onDeeplinkResponse(String responseUri) async {
-    // Verificar se é um resultado de impressão
-    final printResult = DeeplinkResponseParser.parsePrintResult(responseUri);
-
-    if (printResult != null) {
-      switch (printResult) {
-        case PrintResult.success:
-          print('Impressão realizada com sucesso!');
-          break;
-        case PrintResult.printerOutOfPaper:
-          print('Impressora sem papel ou com tampa aberta');
-          break;
-        case PrintResult.printerInitError:
-          print('Erro ao inicializar impressora');
-          break;
-        // ... outros casos
-        default:
-          print('Erro: ${printResult.description}');
-      }
-    } else {
-      // Processar outros tipos de resposta (pagamento, cancelamento, etc.)
-      print('Resposta recebida: $responseUri');
-    }
-  }
-
-  // ... outros métodos
-}
-```
-
-## 📚 API Completa
-
-### StoneDeepTech
-
-Classe principal do plugin, singleton.
-
-#### Métodos
-
-- `static StoneDeepTech get I` - Retorna a instância singleton
-- `Deeplink initDeeplink({required IDeepLinkHandler handler, required String licenceKey, String licenceInternalKey = licenceCheck})` - Inicializa o plugin com um handler e configura a licença (`licenceInternalKey` é opcional; valores fora do servidor oficial são ignorados)
-
-### DeeplinkParams
-
-Parâmetros para envio de pagamento.
-
-#### Propriedades
-
-| Propriedade        | Tipo               | Obrigatório | Padrão  | Descrição                                    |
-| ------------------ | ------------------ | ----------- | ------- | -------------------------------------------- |
-| `amount`           | `int?`             | Não         | -       | Valor em centavos (ex: 10000 = R$ 100,00)    |
-| `editableAmount`   | `bool`             | Não         | `false` | Permite editar valor no app de pagamento     |
-| `transactionType`  | `TransactionType?` | Não         | -       | DEBIT, CREDIT, VOUCHER, INSTANT_PAYMENT, PIX |
-| `installmentCount` | `int?`             | Não         | -       | Número de parcelas (2 a 99)                  |
-| `installmentType`  | `InstallmentType?` | Não         | `NONE`  | MERCHANT, ISSUER, ou NONE                    |
-| `orderId`          | `int?`             | Não         | -       | ID do pedido para rastreamento               |
-| `returnScheme`     | `String`           | Sim         | -       | Scheme do app para receber resposta          |
-
-#### Enums
-
-**TransactionType:**
-
-- `debit` - Débito
-- `credit` - Crédito
-- `voucher` - Voucher
-- `instantPayment` - Pagamento instantâneo
-- `pix` - PIX
-
-**InstallmentType:**
-
-- `merchant` - Parcelado sem juros
-- `issuer` - Parcelado com juros
-- `none` - À vista (padrão)
-
-### CancelParams
-
-Parâmetros para cancelamento.
-
-#### Propriedades
-
-| Propriedade      | Tipo     | Obrigatório | Padrão  | Descrição                           |
-| ---------------- | -------- | ----------- | ------- | ----------------------------------- |
-| `returnScheme`   | `String` | Sim         | -       | Scheme do app para receber resposta |
-| `atk`            | `String` | Sim         | -       | Código único da transação           |
-| `amount`         | `int?`   | Não         | -       | Valor em centavos                   |
-| `editableAmount` | `bool`   | Não         | `false` | Permite editar valor                |
-
-### PrintParams
-
-Parâmetros para impressão customizada.
-
-#### Propriedades
-
-| Propriedade          | Tipo                 | Obrigatório | Padrão | Descrição                           |
-| -------------------- | -------------------- | ----------- | ------ | ----------------------------------- |
-| `schemeReturn`       | `String`             | Sim         | -      | Scheme do app para receber resposta |
-| `printableContent`   | `List<PrintContent>` | Sim         | -      | Lista de conteúdo para impressão    |
-| `showFeedbackScreen` | `bool`               | Não         | `true` | Mostrar tela de sucesso/erro        |
-
-#### Tipos de Conteúdo
-
-**TextPrintContent:**
-
-- `content` (String) - Texto a ser impresso
-- `align` (PrintTextAlign) - center, right, left
-- `size` (PrintTextSize) - big, medium, small
-
-**LinePrintContent:**
-
-- `content` (String) - Texto sem customização
-
-**ImagePrintContent:**
-
-- `imagePath` (String) - Imagem em Base64
-
-### ReprintParams
-
-Parâmetros para reimpressão.
-
-#### Propriedades
-
-| Propriedade          | Tipo           | Obrigatório | Padrão | Descrição                           |
-| -------------------- | -------------- | ----------- | ------ | ----------------------------------- |
-| `schemeReturn`       | `String`       | Sim         | -      | Scheme do app para receber resposta |
-| `atk`                | `String`       | Sim         | -      | Código único da transação           |
-| `typeCustomer`       | `TypeCustomer` | Sim         | -      | CLIENT ou MERCHANT                  |
-| `showFeedbackScreen` | `bool`         | Não         | `true` | Mostrar tela de sucesso/erro        |
-
-#### Enums
-
-**TypeCustomer:**
-
-- `client` - Comprovante do cliente
-- `merchant` - Comprovante do lojista
-
-### PrintResult
-
-Resultados possíveis de impressão/reimpressão.
-
-#### Valores
-
-| Resultado                  | Código                     | Descrição                                |
-| -------------------------- | -------------------------- | ---------------------------------------- |
-| `success`                  | SUCCESS                    | Impressão realizada com sucesso          |
-| `printerOutOfPaper`        | PRINTER_OUT_OF_PAPER       | Impressora sem papel ou com tampa aberta |
-| `printerInitError`         | PRINTER_INIT_ERROR         | Erro ao inicializar impressora           |
-| `printerLowEnergy`         | PRINTER_LOW_ENERGY         | Máquina com baixa energia                |
-| `printerBusy`              | PRINTER_BUSY               | Impressora ocupada                       |
-| `printerUnsupportedFormat` | PRINTER_UNSUPPORTED_FORMAT | Formato não suportado                    |
-| `printerInvalidData`       | PRINTER_INVALID_DATA       | Limite máximo do buffer ultrapassado     |
-| `printerOverheating`       | PRINTER_OVERHEATING        | Superaquecimento da impressora           |
-| `printerPaperJam`          | PRINTER_PAPER_JAM          | Papel preso na caixa de bobina           |
-| `printerPrintError`        | PRINTER_PRINT_ERROR        | Erro genérico da impressora              |
-
-### IDeepLinkHandler
-
-Interface para receber callbacks do plugin.
-
-#### Métodos
-
-- `Future<void> onDeeplinkResponse(String responseUri)` - Chamado quando uma resposta é recebida
-- `Future<void> onError(String message)` - Chamado quando ocorre um erro
-- `Future<void> onDeeplinkSent()` - Chamado quando o deeplink é enviado
-
-## 💡 Exemplos Completos
-
-### Exemplo 1: Pagamento Simples
+## Uso rápido
 
 ```dart
 import 'package:flutter/material.dart';
 import 'package:stone_deep_tech/stone_deep_tech.dart';
 
+void main() => runApp(const MaterialApp(home: PaymentPage()));
+
 class PaymentPage extends StatefulWidget {
+  const PaymentPage({super.key});
+
   @override
-  _PaymentPageState createState() => _PaymentPageState();
+  State<PaymentPage> createState() => _PaymentPageState();
 }
 
 class _PaymentPageState extends State<PaymentPage> implements IDeepLinkHandler {
-  bool _isLoading = false;
+  String _status = 'Pronto';
 
   @override
   void initState() {
     super.initState();
-    StoneDeepTech.I.initDeeplink(
-      handler: this,
-      licenceKey: 'SUA_CHAVE',
-    );
+    // Registre o handler o quanto antes: respostas que chegarem antes
+    // (app aberto a frio pela Stone) são entregues logo depois do registro.
+    StoneDeepTech.I.initDeeplink(handler: this);
   }
 
-  Future<void> processPayment() async {
-    setState(() => _isLoading = true);
-
-    final params = DeeplinkParams(
-      amount: 10000, // R$ 100,00
-      editableAmount: false,
-      transactionType: TransactionType.debit,
-      returnScheme: 'meuapp',
+  Future<void> _pay() async {
+    final ok = await StoneDeepTech.I.deeplink.sendDeeplink(
+      DeeplinkParams(
+        amount: 1000, // R$ 10,00 em centavos
+        transactionType: TransactionType.debit,
+        returnScheme: 'meuapp', // igual ao @string/return_scheme
+      ),
     );
-
-    await StoneDeepTech.I.deeplink.sendDeeplink(params);
+    if (!ok) setState(() => _status = 'Não foi possível abrir a Stone');
   }
+
+  @override
+  Future<void> onDeeplinkSent() async => setState(() => _status = 'Aguardando a Stone...');
 
   @override
   Future<void> onDeeplinkResponse(String responseUri) async {
-    setState(() => _isLoading = false);
-    print('Resposta: $responseUri');
-    // Processar resposta...
+    // Ex.: meuapp://pay-response?code=0&atk=...
+    final uri = Uri.parse(responseUri);
+    setState(() => _status = 'Resposta: ${uri.queryParameters}');
   }
 
   @override
-  Future<void> onError(String message) async {
-    setState(() => _isLoading = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Erro: $message')),
-    );
-  }
-
-  @override
-  Future<void> onDeeplinkSent() async {
-    print('Deeplink enviado');
-  }
+  Future<void> onError(String message) async => setState(() => _status = 'Erro: $message');
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Pagamento')),
+      appBar: AppBar(title: const Text('Stone Deep Tech')),
       body: Center(
-        child: ElevatedButton(
-          onPressed: _isLoading ? null : processPayment,
-          child: _isLoading
-            ? CircularProgressIndicator()
-            : Text('Pagar R\$ 100,00'),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(_status),
+            const SizedBox(height: 16),
+            ElevatedButton(onPressed: _pay, child: const Text('Pagar R\$ 10,00 no débito')),
+          ],
         ),
       ),
     );
@@ -550,231 +185,376 @@ class _PaymentPageState extends State<PaymentPage> implements IDeepLinkHandler {
 }
 ```
 
-### Exemplo 2: Impressão com Tratamento de Erros
+## Referência da API
+
+### `StoneDeepTech`
+
+Ponto de entrada do plugin.
+
+| Membro | Descrição |
+| --- | --- |
+| `static StoneDeepTech get I` | Instância singleton (canal `stone_deep_tech`). |
+| `static const String channelName` | Nome do MethodChannel: `"stone_deep_tech"`. |
+| `Deeplink initDeeplink({required IDeepLinkHandler handler})` | Registra o handler e devolve o `Deeplink`. Pode ser chamado de novo para trocar o handler. Avisa o nativo de que o handler está pronto, e o nativo entrega as respostas da Stone recebidas antes. Uma falha nesse aviso chega em `handler.onError`. |
+| `Deeplink get deeplink` | O `Deeplink` inicializado. Lança uma `String` se `initDeeplink` ainda não foi chamado. |
 
 ```dart
-import 'package:stone_deep_tech/stone_deep_tech.dart';
+final deeplink = StoneDeepTech.I.initDeeplink(handler: MeuHandler());
+// depois, em qualquer lugar:
+await StoneDeepTech.I.deeplink.sendPrint(params);
+```
 
-class PrintHandler implements IDeepLinkHandler {
-  @override
-  Future<void> onDeeplinkResponse(String responseUri) async {
-    final printResult = DeeplinkResponseParser.parsePrintResult(responseUri);
+### `Deeplink`
 
-    if (printResult != null) {
-      if (printResult == PrintResult.success) {
-        print('✅ Impressão realizada com sucesso!');
-      } else {
-        print('❌ Erro na impressão: ${printResult.description}');
-        // Exibir mensagem de erro ao usuário
-      }
-    }
-  }
+Todas as operações retornam `Future<bool>`: `true` quando o app da Stone foi aberto (e `onDeeplinkSent` foi chamado), `false` quando houve erro (e `onError` foi chamado). Nenhuma delas lança exceção.
 
-  @override
-  Future<void> onError(String message) async {
-    print('Erro: $message');
-    if (message.contains('LICENCE_ERROR')) {
-      print('Licença inválida ou não configurada');
-    }
-  }
+| Método | Parâmetro | App aberto |
+| --- | --- | --- |
+| `Future<bool> sendDeeplink(DeeplinkParams params)` | pagamento | `payment-app://pay` |
+| `Future<bool> sendCancel(CancelParams params)` | cancelamento | `cancel-app://cancel` |
+| `Future<bool> sendPrint(PrintParams params)` | impressão customizada | `printer-app://print` |
+| `Future<bool> sendReprint(ReprintParams params)` | reimpressão | `reprinter-app://reprint` |
+| `void setHandler(IDeepLinkHandler newHandler)` | troca o handler | - |
+| `static Deeplink create({required MethodChannel channel, required IDeepLinkHandler handler})` | uso avançado/testes: o mesmo que `initDeeplink` com outro canal | - |
+| `IDeepLinkHandler handler` | handler atual | - |
 
-  @override
-  Future<void> onDeeplinkSent() async {
-    print('Enviando impressão...');
-  }
-}
+O resultado da transação não vem no `bool`: ele chega depois, em `onDeeplinkResponse`, quando a Stone devolve o controle ao app.
 
-void printReceipt() {
-  final handler = PrintHandler();
-  StoneDeepTech.I.initDeeplink(
-    handler: handler,
-    licenceKey: 'SUA_CHAVE',
-  );
+### `IDeepLinkHandler`
 
-  final content = [
-    TextPrintContent(
-      content: 'COMPROVANTE DE VENDA',
-      align: PrintTextAlign.center,
-      size: PrintTextSize.big,
-    ),
-    LinePrintContent(content: '--------------------------------'),
-    TextPrintContent(
-      content: 'Valor: R\$ 100,00',
-      align: PrintTextAlign.left,
-      size: PrintTextSize.medium,
-    ),
-  ];
+```dart
+abstract class IDeepLinkHandler {
+  /// URI de retorno enviada pela Stone (ex.: meuapp://pay-response?code=0&atk=...).
+  Future<void> onDeeplinkResponse(String responseUri);
 
-  final params = PrintParams(
-    schemeReturn: 'meuapp',
-    printableContent: content,
-    showFeedbackScreen: true,
-  );
+  /// Erro de uma operação ou do canal (texto da exceção, ex.: "PlatformException(ERROR, ...)").
+  Future<void> onError(String message);
 
-  StoneDeepTech.I.deeplink.sendPrint(params);
+  /// O app da Stone foi aberto com sucesso.
+  Future<void> onDeeplinkSent();
 }
 ```
 
-## 🔍 Tratamento de Erros
+### `DeeplinkParams` (pagamento)
 
-### Erros de Licença
+| Campo | Tipo | Obrigatório | Padrão | Descrição |
+| --- | --- | --- | --- | --- |
+| `returnScheme` | `String` | Sim | - | Scheme de retorno (o mesmo do `AndroidManifest`) |
+| `amount` | `int?` | Não | - | Valor em centavos (`10000` = R$ 100,00). Aceita 64 bits |
+| `editableAmount` | `bool` | Não | `false` | Permite editar o valor no app da Stone |
+| `transactionType` | `TransactionType?` | Não | - | Tipo da transação; sem ele a Stone pergunta ao operador |
+| `installmentCount` | `int?` | Não | - | Número de parcelas (2 a 99) |
+| `installmentType` | `InstallmentType?` | Não | `InstallmentType.none` | Tipo de parcelamento. Só é enviado quando `transactionType` é `credit` |
+| `orderId` | `int?` | Não | - | Identificador do pedido. Aceita 64 bits (ex.: timestamp) |
 
-Os métodos do `Deeplink` não lançam exceção: em caso de falha retornam `false` e entregam a mensagem em `IDeepLinkHandler.onError`.
+### `CancelParams` (cancelamento)
+
+| Campo | Tipo | Obrigatório | Padrão | Descrição |
+| --- | --- | --- | --- | --- |
+| `returnScheme` | `String` | Sim | - | Scheme de retorno |
+| `atk` | `String` | Sim | - | Código único da transação gerado pelo autorizador da Stone |
+| `amount` | `int?` | Não | - | Valor a cancelar, em centavos |
+| `editableAmount` | `bool` | Não | `false` | Permite editar o valor |
+
+### `PrintParams` (impressão customizada)
+
+| Campo | Tipo | Obrigatório | Padrão | Descrição |
+| --- | --- | --- | --- | --- |
+| `schemeReturn` | `String` | Sim | - | Scheme de retorno |
+| `printableContent` | `List<PrintContent>` | Sim | - | Itens a imprimir, em ordem |
+| `showFeedbackScreen` | `bool` | Não | `true` | Mostra a tela de sucesso/erro da Stone no fim |
+
+Itens de `PrintContent`:
+
+| Classe | Campos | Descrição |
+| --- | --- | --- |
+| `TextPrintContent` | `content`, `align` (`PrintTextAlign`), `size` (`PrintTextSize`) | Texto formatado |
+| `LinePrintContent` | `content` | Linha de texto sem formatação |
+| `ImagePrintContent` | `imagePath` | Imagem em Base64 |
+
+### `ReprintParams` (reimpressão)
+
+| Campo | Tipo | Obrigatório | Padrão | Descrição |
+| --- | --- | --- | --- | --- |
+| `schemeReturn` | `String` | Sim | - | Scheme de retorno |
+| `atk` | `String` | Sim | - | Código da transação |
+| `typeCustomer` | `TypeCustomer` | Sim | - | Via do cliente ou do lojista |
+| `showFeedbackScreen` | `bool` | Não | `true` | Mostra a tela de sucesso/erro |
+
+### Enums
+
+| Enum | Valores (`value` enviado à Stone) |
+| --- | --- |
+| `TransactionType` | `debit` (`DEBIT`), `credit` (`CREDIT`), `voucher` (`VOUCHER`), `instantPayment` (`INSTANT_PAYMENT`), `pix` (`PIX`) |
+| `InstallmentType` | `merchant` (`MERCHANT`, parcelado sem juros), `issuer` (`ISSUER`, parcelado com juros), `none` (`NONE`, à vista) |
+| `TypeCustomer` | `client` (`CLIENT`), `merchant` (`MERCHANT`) |
+| `PrintTextAlign` | `center`, `right`, `left` |
+| `PrintTextSize` | `big`, `medium`, `small` |
+| `PrintContentType` | `text`, `line`, `image` |
+
+### `PrintResult` e `DeeplinkResponseParser`
+
+Para interpretar o retorno de `sendPrint`/`sendReprint`:
+
+| Membro | Descrição |
+| --- | --- |
+| `static PrintResult? PrintResult.fromUri(String uri)` | Lê o código dos parâmetros `result`, `status`, `code` ou `print_result`; se não achar, procura um código conhecido em qualquer parte da URI |
+| `static PrintResult? PrintResult.fromString(String result)` | Converte o código (ignora maiúsculas e espaços) |
+| `String value` / `String description` | Código da Stone e descrição em português |
+| `DeeplinkResponseParser.parsePrintResult(uri)` | O mesmo que `PrintResult.fromUri` |
+| `DeeplinkResponseParser.isPrintResult(uri)` | `true` se a URI tem um resultado de impressão |
+| `DeeplinkResponseParser.extractResultCode(uri)` | O valor bruto de `result`/`status`/`code`/`print_result` |
+
+| `PrintResult` | Código | Significado |
+| --- | --- | --- |
+| `success` | `SUCCESS` | Impressão realizada |
+| `printerOutOfPaper` | `PRINTER_OUT_OF_PAPER` | Sem papel ou tampa da bobina aberta |
+| `printerInitError` | `PRINTER_INIT_ERROR` | Erro ao inicializar a impressora |
+| `printerLowEnergy` | `PRINTER_LOW_ENERGY` | Bateria baixa |
+| `printerBusy` | `PRINTER_BUSY` | Impressora ocupada |
+| `printerUnsupportedFormat` | `PRINTER_UNSUPPORTED_FORMAT` | Formato de conteúdo não suportado |
+| `printerInvalidData` | `PRINTER_INVALID_DATA` | Limite do buffer ultrapassado |
+| `printerOverheating` | `PRINTER_OVERHEATING` | Superaquecimento |
+| `printerPaperJam` | `PRINTER_PAPER_JAM` | Papel preso |
+| `printerPrintError` | `PRINTER_PRINT_ERROR` | Erro genérico da impressora |
+
+## Exemplos por operação
+
+Nos exemplos, `deeplink` é `StoneDeepTech.I.deeplink`, já inicializado.
+
+### Débito
+
+```dart
+await deeplink.sendDeeplink(DeeplinkParams(
+  amount: 2500,
+  transactionType: TransactionType.debit,
+  returnScheme: 'meuapp',
+));
+```
+
+### Crédito à vista
+
+```dart
+await deeplink.sendDeeplink(DeeplinkParams(
+  amount: 15000,
+  transactionType: TransactionType.credit,
+  installmentType: InstallmentType.none,
+  returnScheme: 'meuapp',
+));
+```
+
+### Crédito parcelado
+
+```dart
+await deeplink.sendDeeplink(DeeplinkParams(
+  amount: 30000,
+  transactionType: TransactionType.credit,
+  installmentCount: 3,
+  installmentType: InstallmentType.merchant, // sem juros; ISSUER = com juros
+  orderId: DateTime.now().millisecondsSinceEpoch,
+  returnScheme: 'meuapp',
+));
+```
+
+### PIX
+
+```dart
+await deeplink.sendDeeplink(DeeplinkParams(
+  amount: 4990,
+  transactionType: TransactionType.pix,
+  returnScheme: 'meuapp',
+));
+```
+
+### Voucher
+
+```dart
+await deeplink.sendDeeplink(DeeplinkParams(
+  amount: 3200,
+  transactionType: TransactionType.voucher,
+  returnScheme: 'meuapp',
+));
+```
+
+### Valor digitado na Stone
+
+```dart
+await deeplink.sendDeeplink(DeeplinkParams(
+  editableAmount: true,
+  returnScheme: 'meuapp',
+));
+```
+
+### Cancelamento / estorno
+
+```dart
+await deeplink.sendCancel(CancelParams(
+  returnScheme: 'meuapp',
+  atk: atkDaTransacao,
+  amount: 15000, // opcional: sem ele a Stone usa o valor da transação
+));
+```
+
+### Impressão customizada
+
+```dart
+await deeplink.sendPrint(PrintParams(
+  schemeReturn: 'meuapp',
+  printableContent: [
+    TextPrintContent(content: 'LOJA EXEMPLO', align: PrintTextAlign.center, size: PrintTextSize.big),
+    LinePrintContent(content: '--------------------------------'),
+    TextPrintContent(content: 'Total: R\$ 150,00', align: PrintTextAlign.right, size: PrintTextSize.medium),
+    ImagePrintContent(imagePath: logoBase64),
+  ],
+  showFeedbackScreen: false,
+));
+```
+
+### Reimpressão
+
+```dart
+await deeplink.sendReprint(ReprintParams(
+  schemeReturn: 'meuapp',
+  atk: atkDaTransacao,
+  typeCustomer: TypeCustomer.merchant,
+));
+```
+
+### Tratar o retorno
+
+```dart
+@override
+Future<void> onDeeplinkResponse(String responseUri) async {
+  final printResult = DeeplinkResponseParser.parsePrintResult(responseUri);
+  if (printResult != null) {
+    debugPrint('Impressão: ${printResult.description}');
+    return;
+  }
+  // Pagamento ou cancelamento: os parâmetros vêm da Stone na própria URI.
+  final params = Uri.parse(responseUri).queryParameters;
+  debugPrint('Retorno da Stone: $params');
+}
+```
+
+## Tratamento de erros
+
+Os métodos de `Deeplink` não lançam exceção. Em caso de falha retornam `false` e chamam `onError` com o texto da exceção (por exemplo `PlatformException(ERROR, No Activity found to handle Intent ..., null, null)`).
+
+| Código / exceção | Quando acontece | O que fazer |
+| --- | --- | --- |
+| `ERROR` | O app da Stone não pôde ser aberto (app ausente, `No Activity found`), argumento com tipo errado ou plugin desanexado do engine | Confirme que é uma maquininha Stone com os apps instalados; confira os parâmetros |
+| `stone_deep_tech_missing_binary` | A implementação nativa pré-compilada (`android/libs`) não foi encontrada | Reinstale o pacote; se compilou o nativo localmente, rode `scripts/build_android_aar.sh` |
+| `MissingPluginException` | Plataforma sem implementação (ex.: iOS, web) ou plugin não registrado | Use em Android; faça um rebuild completo do app |
+| `"DEEPLINK NEEDS TO BE INITIALIZED! ..."` (`String` lançada) | `StoneDeepTech.I.deeplink` antes de `initDeeplink` | Chame `initDeeplink` na inicialização do app |
 
 ```dart
 @override
 Future<void> onError(String message) async {
-  if (message.contains('LICENCE_ERROR') ||
-      message.contains('LICENCE_NOT_CONFIGURED')) {
-    // Licença inválida, vencida, sem vaga para o aparelho ou não configurada
-    print('Verifique a licença em https://portal.jylabtech.com.br');
+  if (message.contains('No Activity found')) {
+    // App da Stone ausente: provavelmente não é uma maquininha Stone.
   }
+  debugPrint('Erro Stone: $message');
 }
 ```
 
-Veja a tabela de [erros de licença](#erros-de-licença) para os motivos retornados pelo servidor.
+Erros da própria transação (cartão recusado, operação cancelada pelo operador etc.) não passam por `onError`: eles vêm na URI de `onDeeplinkResponse`.
 
-### Erros de Validação
+### Problemas comuns
 
-O plugin valida automaticamente:
+- **A resposta não chega:** confira o `intent-filter`, o `launchMode="singleTop"` e se o scheme do `strings.xml` é o mesmo de `returnScheme`/`schemeReturn`. Chame `initDeeplink` logo na inicialização.
+- **Outro deeplink do app parou de funcionar:** use para a Stone um scheme que o app não usa em outros deeplinks.
+- **Parcelamento ignorado:** `installmentType` só é enviado com `transactionType: TransactionType.credit`.
 
-- Licença configurada
-- Licença válida no servidor
-- Parâmetros obrigatórios presentes
+## App de exemplo
 
-### Erros de Impressão
+O diretório [`example/`](example/) tem um app com todas as operações (pagamento, cancelamento, impressão e reimpressão) e um log das respostas.
 
-Use o enum `PrintResult` para identificar erros específicos:
-
-```dart
-final printResult = DeeplinkResponseParser.parsePrintResult(responseUri);
-if (printResult == PrintResult.printerOutOfPaper) {
-  // Informar usuário sobre falta de papel
-}
+```bash
+cd example
+flutter run
 ```
 
-## 🐛 Troubleshooting
+Rode numa maquininha Stone Smart POS. Em um emulador ou celular comum o app abre, mas as operações retornam `ERROR` porque os apps da Stone não existem.
 
-### Problema: Deeplink não abre o app Stone
+## Testes
 
-**Solução:**
-
-1. Verifique se o aplicativo Stone está instalado
-2. Verifique se o `returnScheme` está configurado corretamente
-3. Verifique os logs do Android para erros
-
-### Problema: Resposta não é recebida
-
-**Solução:**
-
-1. Verifique se o `intent-filter` está configurado no `AndroidManifest.xml`
-2. Verifique se o `launchMode="singleTop"` está configurado
-3. Verifique se o `returnScheme` corresponde ao `strings.xml`
-4. Verifique se o handler está implementado corretamente
-5. A resposta só é reconhecida se o scheme da URI de retorno for o mesmo informado em `returnScheme`/`schemeReturn` (sem diferenciar maiúsculas/minúsculas). Outros deeplinks do app são ignorados pelo plugin e seguem normalmente; use um scheme exclusivo para o retorno da Stone
-6. Chame `StoneDeepTech.I.initDeeplink` logo na inicialização do app: se o app for aberto pela resposta da Stone antes disso, a resposta fica guardada e é entregue a `onDeeplinkResponse` assim que o plugin for inicializado
-
-### Problema: Erro de licença
-
-**Solução:**
-
-1. Verifique se as chaves estão sendo fornecidas ao chamar `StoneDeepTech.I.initDeeplink`
-2. Confira a `licenceKey` no portal [portal.jylabtech.com.br](https://portal.jylabtech.com.br) e se a licença está ativa e dentro da validade
-3. Não é preciso informar `licenceInternalKey`: a validação sempre vai para o servidor oficial da JY Labtech
-4. Verifique a conexão com a internet (primeira operação após abrir o app e a cada 4 horas; sem internet, a operação só funciona se houver uma validação bem-sucedida nas últimas 72 horas)
-5. Veja no Logcat (tag `StoneDeepTechNative`) a mensagem retornada pelo servidor e consulte a tabela de [erros de licença](#erros-de-licença)
-6. Erro 412: o limite de aparelhos foi atingido ou o aparelho foi desativado; ajuste no portal
-7. Trocou de chave ou de plano? Quando a chave muda, a licença salva offline é ignorada e revalidada no servidor
-8. Licença renovada ou reativada no portal? Reabra o app: a primeira operação revalida no servidor (com o app aberto, a revalidação acontece a cada 4 horas)
-
-### Problema: Parcelamento não funciona
-
-**Solução:**
-
-1. Verifique se `transactionType` é `credit`
-2. Verifique se `installmentCount` está entre 2 e 99
-3. Lembre-se: `installmentType` só é enviado quando `transactionType` é `credit`
-
-## 📁 Estrutura do Projeto
-
-```
-lib/
-├── src/
-│   ├── deeplink/
-│   │   └── deeplink.dart              # Classe principal de deeplink
-│   ├── interface/
-│   │   ├── handler/
-│   │   │   └── ideeplink_handler.dart  # Interface de handler
-│   │   └── model/
-│   │       ├── deeplink_params.dart   # Parâmetros de pagamento
-│   │       ├── cancel_params.dart     # Parâmetros de cancelamento
-│   │       ├── print_params.dart      # Parâmetros de impressão
-│   │       ├── print_result.dart      # Resultados de impressão
-│   │       └── reprint_params.dart    # Parâmetros de reimpressão
-│   └── licence/
-│       ├── constants/
-│       │   └── licence_constants.dart  # Constantes de licença
-│       └── licence.dart               # Exportação do módulo
-└── stone_deep_tech.dart               # Classe principal do plugin
-```
-
-## 📝 Notas Importantes
-
-1. **Validação de Licença**: Todas as operações são bloqueadas se a licença não for válida
-2. **Thread Safety**: O plugin é thread-safe e pode ser usado de qualquer thread
-3. **Singleton**: O plugin usa o padrão singleton, então sempre use `StoneDeepTech.I`
-4. **Callbacks**: Os callbacks são assíncronos e podem ser chamados de qualquer thread
-5. **Parcelamento**: `installmentType` só é enviado quando `transactionType` é `credit`
-6. **Impressão**: Imagens devem estar em formato Base64
-7. **Valores**: Todos os valores monetários são em centavos (inteiros); `amount` e `orderId` aceitam inteiros de 64 bits
-8. **Resposta única**: cada chamada do plugin recebe exatamente uma resposta do nativo (`true`/`false`); erros de configuração da licença disparados por `initDeeplink` chegam em `onError`
-9. **Resultado de impressão**: `PrintResult.fromUri`/`DeeplinkResponseParser.parsePrintResult` leem primeiro o código dos parâmetros `result`, `status`, `code` ou `print_result` da URI de retorno
-
-## 🧪 Testes
-
-Testes Dart (MethodChannel mockado): todos os métodos públicos (argumentos exatos enviados ao nativo, sucesso, `PlatformException`, `LICENCE_ERROR`), as chamadas nativo → Dart, os modelos, os enums e os parsers:
+Testes Dart (MethodChannel mockado: argumentos de cada método, sucesso, erro, entrega das respostas do nativo, modelos e parsers):
 
 ```bash
 flutter test
 ```
 
-Testes nativos JVM, com JDK 17: validação de licença (regras, URL travada no servidor oficial, parse da resposta, cache offline), gate de licença por operação, URI de cada deeplink da Stone (`DeeplinkRequests`), resposta única (`SafeResult`), entrega das respostas da Stone ao Dart e a ponte do plugin:
+Testes nativos JVM (JDK 17). O primeiro comando testa a implementação nativa (`android/native`: montagem de cada deeplink, resposta única, filtro e fila das respostas da Stone) e o segundo, a ponte do plugin:
 
 ```bash
 cd example/android
-./gradlew --no-daemon -p ../../android/native testReleaseUnitTest
+FLUTTER_SDK=/caminho/do/flutter ./gradlew --no-daemon -p ../../android/native testDebugUnitTest
 ./gradlew --no-daemon :stone_deep_tech:testDebugUnitTest
 ```
 
-O primeiro comando exige `flutter precache --android` no SDK definido em `android/native/local.properties` (`flutter.sdk`) ou em `FLUTTER_SDK`. Depois de alterar `android/native`, regenere os binários com `make build-native` (ou `sh scripts/build_android_aar.sh`; argumentos extras do Gradle via `GRADLE_ARGS`, ex.: `GRADLE_ARGS="--no-daemon -Dorg.gradle.jvmargs=-Xmx2g"`).
+O módulo `android/native` compila contra o `flutter.jar` do SDK informado em `FLUTTER_SDK` (ou `flutter.sdk` em `android/native/local.properties`); rode `flutter precache --android` nesse SDK antes. Depois de alterar `android/native`, regenere os binários de `android/libs` com:
 
-## 🔗 Referências
+```bash
+GRADLE_ARGS="--no-daemon -Dorg.gradle.jvmargs=-Xmx2g" sh scripts/build_android_aar.sh
+```
 
-- [Stone Payment SDK](https://developer.stone.com.br/)
-- [Flutter Plugin Development](https://flutter.dev/docs/development/packages-and-plugins/developing-packages)
+## Migração da 1.x para a 2.0
 
-## 📄 Licença
+A 2.0 torna o plugin open source (MIT) e remove toda a validação de licença e a cobrança. Não há mais chave, servidor de licença nem consulta à internet.
 
-Veja o arquivo LICENSE para mais detalhes.
+O que mudou:
 
-## 📞 Suporte
+- `StoneDeepTech.initDeeplink` e `Deeplink.create`: os parâmetros `licenceKey` e `licenceInternalKey` foram removidos.
+- `Deeplink.updateLicence` foi removido.
+- A constante `licenceCheck` e as constantes `CHANNEL_NAME` e `USER_REFERENCE` (exportadas pelo módulo de licença) foram removidas. Use `StoneDeepTech.channelName` no lugar de `CHANNEL_NAME`.
+- Os erros `LICENCE_ERROR`, `LICENCE_NOT_CONFIGURED` e `INVALID_ARGUMENT` (do `configureLicence`) não existem mais. As operações abrem a Stone direto.
+- O `--dart-define` da chave e as entradas `licenceKey`/`licenceInternalKey` do `local.properties` não são mais lidos e podem ser apagados.
+- O plugin não declara mais a permissão `INTERNET`.
 
-Para suporte, abra uma issue no repositório do projeto.
+Antes (1.x):
 
----
+```dart
+StoneDeepTech.I.initDeeplink(
+  handler: handler,
+  licenceKey: const String.fromEnvironment('STONE_DEEP_TECH_LICENCE_KEY'),
+);
 
-**Desenvolvido com ❤️ para facilitar a integração com Stone Payment**
+await StoneDeepTech.I.deeplink.updateLicence(licenceKey: novaChave);
 
----
+@override
+Future<void> onError(String message) async {
+  if (message.contains('LICENCE_ERROR')) { /* ... */ }
+}
+```
 
-<div align="left">
-  <table>
-  <tr>
-    <td align="center"><a href="https://github.com/JY-Labtech"><img src="https://avatars.githubusercontent.com/u/185066406?s=200&v=4" width="100px;" alt=""/><br /><sub><b>JY Labtech</b></sub></a><br /> <a href="https://github.com/JY-Labtech" title="Autor"></a></td>
-  </tr>
+Depois (2.0):
 
-</table>
+```dart
+StoneDeepTech.I.initDeeplink(handler: handler);
 
-</div>
+@override
+Future<void> onError(String message) async {
+  debugPrint(message);
+}
+```
 
----
+As operações, os modelos e o handler não mudaram.
+
+## Contribuindo
+
+Issues e pull requests são bem-vindos em [github.com/JY-Labtech/stone_deep_tech](https://github.com/JY-Labtech/stone_deep_tech/issues).
+
+1. Abra uma issue descrevendo o problema ou a proposta.
+2. Faça um fork, crie um branch e inclua testes (Dart e, se mexer no nativo, JVM).
+3. Rode `flutter analyze`, `flutter test` e os testes nativos antes do PR.
+4. Se alterar `android/native`, regenere `android/libs` com `scripts/build_android_aar.sh` no mesmo PR.
+
+## Licença
+
+Distribuído sob a licença MIT. Veja o arquivo [LICENSE](LICENSE).
+
+## Créditos
+
+Desenvolvido e mantido pela [JY Labtech](https://jylabtech.com.br).
+
+<a href="https://github.com/JY-Labtech"><img src="https://avatars.githubusercontent.com/u/185066406?s=200&v=4" width="80" alt="JY Labtech" /></a>

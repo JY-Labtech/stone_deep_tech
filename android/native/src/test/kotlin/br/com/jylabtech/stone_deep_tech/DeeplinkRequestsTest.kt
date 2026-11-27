@@ -62,7 +62,7 @@ class DeeplinkRequestsTest {
     @Test
     fun unknownMethodIsRejected() {
         assertThrows(IllegalArgumentException::class.java) {
-            DeeplinkRequests.fromCall(MethodCall("configureLicence", null))
+            DeeplinkRequests.fromCall(MethodCall("initDeeplink", null))
         }
     }
 

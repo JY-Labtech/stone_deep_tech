@@ -28,7 +28,7 @@ class InMemoryReturnSchemeStore : ReturnSchemeStore {
 
 /**
  * Persistido em SharedPreferences próprio (não sensível: só o nome do scheme), para reconhecer a
- * resposta mesmo se o processo morrer enquanto o app da Stone está aberto. Prefs de licença intactos.
+ * resposta mesmo se o processo morrer enquanto o app da Stone está aberto.
  */
 internal class SharedPrefsReturnSchemeStore(context: Context) : ReturnSchemeStore {
     private val appContext = context.applicationContext ?: context

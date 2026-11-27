@@ -1,7 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:stone_deep_tech/src/deeplink/deeplink.dart';
 import 'package:stone_deep_tech/src/interface/handler/ideeplink_handler.dart';
-import 'package:stone_deep_tech/src/licence/constants/licence_constants.dart';
 
 export 'src/deeplink/deeplink.dart';
 export 'src/interface/handler/ideeplink_handler.dart';
@@ -10,7 +9,6 @@ export 'src/interface/model/cancel_params.dart';
 export 'src/interface/model/print_params.dart';
 export 'src/interface/model/print_result.dart';
 export 'src/interface/model/reprint_params.dart';
-export 'src/licence/licence.dart';
 
 class StoneDeepTech {
   static const channelName = "stone_deep_tech";
@@ -26,31 +24,20 @@ class StoneDeepTech {
     return _instance!;
   }
 
-  /// Function to initialize deeplink and register the handler.
+  /// Inicializa o deeplink e registra o [handler] que recebe as respostas da Stone.
   ///
-  /// [licenceInternalKey] é opcional (padrão: [licenceCheck], servidor oficial da
-  /// JY Labtech). Valores que não apontam para o servidor oficial são ignorados
-  /// pelo nativo, que sempre valida em `licence-server.invalid`.
-  Deeplink initDeeplink({
-    required IDeepLinkHandler handler,
-    required String licenceKey,
-    String licenceInternalKey = licenceCheck,
-  }) {
-    // Deeplink.create reaproveita a instância existente: troca o handler e
-    // reconfigura a licença (falhas do nativo vão para handler.onError).
-    _deeplink = Deeplink.create(
-      channel: _channel,
-      handler: handler,
-      licenceKey: licenceKey,
-      licenceInternalKey: licenceInternalKey,
-    );
+  /// Pode ser chamado de novo para trocar o handler. Respostas da Stone que
+  /// chegaram antes (app aberto a frio pelo deeplink de retorno) são entregues
+  /// ao [handler] logo após o registro.
+  Deeplink initDeeplink({required IDeepLinkHandler handler}) {
+    _deeplink = Deeplink.create(channel: _channel, handler: handler);
     return _deeplink!;
   }
 
   /// Get the Deeplink object. Note: It needs to be initialized.
   Deeplink get deeplink {
     if (_deeplink == null) {
-      throw "DEEPLINK NEEDS TO BE INITIALIZED! \n TRY: StoneDeepTech.I.initDeeplink(handler: ..., licenceKey: '...')";
+      throw "DEEPLINK NEEDS TO BE INITIALIZED! \n TRY: StoneDeepTech.I.initDeeplink(handler: ...)";
     }
     return _deeplink!;
   }

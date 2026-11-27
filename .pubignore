@@ -38,3 +38,6 @@ example/Chaves/
 .vscode/
 .DS_Store
 **/.DS_Store
+*.jks
+*.keystore
+*.hprof

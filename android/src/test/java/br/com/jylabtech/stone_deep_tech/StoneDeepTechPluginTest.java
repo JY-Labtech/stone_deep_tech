@@ -12,7 +12,6 @@ import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.MethodChannel;
 
 import java.util.HashMap;
-import java.util.Map;
 
 import org.junit.Test;
 
@@ -21,12 +20,13 @@ import org.junit.Test;
  * (android/libs/stone_deep_tech-native.jar).
  *
  * Rode com: cd example/android && ./gradlew :stone_deep_tech:testDebugUnitTest
- * Os testes da validação de licença ficam em android/native/src/test.
+ * Os testes da implementação nativa ficam em android/native/src/test.
  */
 public class StoneDeepTechPluginTest {
 
   @Test
-  public void operationWithoutLicence_isBlockedByNativeImplementation() {
+  public void operationWithoutEngine_repliesErrorOnceFromNativeImplementation() {
+    // Sem engine anexado não há Context para abrir o app da Stone: erro explícito, nunca sucesso falso.
     StoneDeepTechPlugin plugin = new StoneDeepTechPlugin();
     String[] operations = {"sendDeeplink", "sendCancel", "sendPrint", "sendReprint"};
 
@@ -34,32 +34,17 @@ public class StoneDeepTechPluginTest {
       MethodChannel.Result result = mock(MethodChannel.Result.class);
       plugin.onMethodCall(new MethodCall(method, new HashMap<String, Object>()), result);
 
-      verify(result).error(eq("LICENCE_NOT_CONFIGURED"), anyString(), any());
+      verify(result).error(eq("ERROR"), anyString(), any());
       verify(result, never()).success(any());
     }
   }
 
   @Test
-  public void configureLicence_requiresLicenceKey() {
+  public void initDeeplink_succeedsOnce() {
     StoneDeepTechPlugin plugin = new StoneDeepTechPlugin();
-    Map<String, Object> args = new HashMap<>();
-    args.put("licenceKey", "");
 
     MethodChannel.Result result = mock(MethodChannel.Result.class);
-    plugin.onMethodCall(new MethodCall("configureLicence", args), result);
-
-    verify(result).error(eq("INVALID_ARGUMENT"), anyString(), any());
-    verify(result, never()).success(any());
-  }
-
-  @Test
-  public void configureLicence_withKey_succeedsOnce() {
-    StoneDeepTechPlugin plugin = new StoneDeepTechPlugin();
-    Map<String, Object> args = new HashMap<>();
-    args.put("licenceKey", "test-key");
-
-    MethodChannel.Result result = mock(MethodChannel.Result.class);
-    plugin.onMethodCall(new MethodCall("configureLicence", args), result);
+    plugin.onMethodCall(new MethodCall("initDeeplink", null), result);
 
     verify(result).success(true);
     verify(result, never()).error(anyString(), any(), any());

@@ -1,3 +1,19 @@
+## 2.0.0
+
+- **BREAKING:** validação de licença e cobrança removidas. O plugin não consulta mais nenhum servidor e não precisa de chave.
+  - `StoneDeepTech.initDeeplink`: parâmetros `licenceKey` e `licenceInternalKey` removidos. Agora é `initDeeplink(handler: ...)`.
+  - `Deeplink.create`: parâmetros `licenceKey` e `licenceInternalKey` removidos.
+  - `Deeplink.updateLicence` removido.
+  - Constante `licenceCheck` removida, junto com o módulo `src/licence` e as constantes que ele exportava (`CHANNEL_NAME`, `USER_REFERENCE`). Use `StoneDeepTech.channelName`.
+  - Método de canal `configureLicence` removido. Erros `LICENCE_ERROR`, `LICENCE_NOT_CONFIGURED` e `INVALID_ARGUMENT` (da licença) removidos: as operações (`sendDeeplink`, `sendCancel`, `sendPrint`, `sendReprint`) abrem o app da Stone direto.
+  - Nativo: removidas as classes de licença (`CheckLicenceTech`, `CheckLicenceEntity`, `LicenceConfig`, `LicenceRules`, `LicenceProvider`, `LicenceRemote`, `LicenceResult`, `LicenceStorage`, `EncryptedLicenceStorage`), o gate por operação e a thread de validação. `build.gradle` não lê mais `licenceKey`/`licenceInternalKey` (env/`local.properties`/`BuildConfig`). Dependência `androidx.security:security-crypto` e permissão `INTERNET` removidas.
+- Respostas da Stone recebidas antes do handler (app aberto a frio pelo deeplink de retorno) continuam guardadas: agora são entregues quando o Dart chama o novo método de canal `initDeeplink`, disparado por `StoneDeepTech.initDeeplink`/`Deeplink.create` logo depois de registrar o handler. Falhas nesse aviso vão para `handler.onError`.
+- Projeto open source sob a licença MIT.
+- README reescrito: requisitos, configuração Android, uso rápido, referência completa da API, exemplos por operação, erros, testes e guia de migração.
+- `pubspec.yaml`: descrição em inglês, `repository`, `issue_tracker` e `topics`.
+- Example: removidos o `--dart-define` e as constantes da chave de licença.
+- Testes atualizados: os de licença foram apagados e os demais passam a verificar que cada operação chama o canal/o app da Stone direto. Binários `android/libs` regenerados.
+
 ## 1.3.0
 
 - Licença conforme o contrato do jylabtech_core (JYN-234): o cache offline vale por no máximo 72 horas (antes 7 dias) e só é usado quando o servidor não responde (sem internet, timeout, 408/429, 5xx ou resposta ilegível).

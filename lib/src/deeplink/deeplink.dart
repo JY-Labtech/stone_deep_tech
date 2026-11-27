@@ -6,7 +6,6 @@ import 'package:stone_deep_tech/src/interface/model/deeplink_params.dart';
 import 'package:stone_deep_tech/src/interface/model/cancel_params.dart';
 import 'package:stone_deep_tech/src/interface/model/print_params.dart';
 import 'package:stone_deep_tech/src/interface/model/reprint_params.dart';
-import 'package:stone_deep_tech/src/licence/constants/licence_constants.dart';
 
 /// Deeplink class to handle Stone payment deeplinks
 final class Deeplink {
@@ -21,22 +20,16 @@ final class Deeplink {
     required this.handler,
   });
 
-  /// Factory method to create Deeplink instance.
+  /// Cria (ou reaproveita) a instância e registra o [handler].
   ///
-  /// [licenceInternalKey] é opcional (padrão: [licenceCheck]).
+  /// Chamar de novo só troca o handler. Em toda chamada o nativo é avisado
+  /// (`initDeeplink`) de que o handler está pronto e entrega as respostas da
+  /// Stone que chegaram antes dele (cold start); falhas vão para
+  /// [IDeepLinkHandler.onError].
   static Deeplink create({
     required MethodChannel channel,
     required IDeepLinkHandler handler,
-    required String licenceKey,
-    String licenceInternalKey = licenceCheck,
   }) {
-    final sanitizedLicenceKey = licenceKey.trim();
-    final sanitizedLicenceInternalKey = _sanitizeInternalKey(licenceInternalKey);
-
-    if (sanitizedLicenceKey.isEmpty) {
-      throw ArgumentError('licenceKey é obrigatório.');
-    }
-
     if (_instance == null) {
       final deeplink = Deeplink._(
         channel: channel,
@@ -59,65 +52,20 @@ final class Deeplink {
       _instance!.handler = handler;
     }
 
-    unawaited(
-      _instance!._configureLicenceReportingErrors(
-        licenceKey: sanitizedLicenceKey,
-        licenceInternalKey: sanitizedLicenceInternalKey,
-      ),
-    );
+    unawaited(_instance!._notifyHandlerReady());
 
     return _instance!;
   }
 
-  /// Configuração disparada sem `await` (em [create]): uma falha do nativo
+  /// Disparado sem `await` (em [create]): uma falha do nativo
   /// (ex.: MissingPluginException) vai para [IDeepLinkHandler.onError] em vez
   /// de virar erro assíncrono não tratado.
-  Future<void> _configureLicenceReportingErrors({
-    required String licenceKey,
-    required String licenceInternalKey,
-  }) async {
+  Future<void> _notifyHandlerReady() async {
     try {
-      await _configureLicence(
-        licenceKey: licenceKey,
-        licenceInternalKey: licenceInternalKey,
-      );
+      await channel.invokeMethod('initDeeplink');
     } catch (e) {
       await handler.onError(e.toString());
     }
-  }
-
-  Future<void> _configureLicence({
-    required String licenceKey,
-    required String licenceInternalKey,
-  }) async {
-    await channel.invokeMethod('configureLicence', {
-      'licenceKey': licenceKey,
-      'licenceInternalKey': licenceInternalKey,
-    });
-  }
-
-  static String _sanitizeInternalKey(String licenceInternalKey) {
-    final value = licenceInternalKey.trim();
-    return value.isEmpty ? licenceCheck : value;
-  }
-
-  /// Atualiza as chaves de licença. [licenceInternalKey] é opcional
-  /// (padrão: [licenceCheck]).
-  Future<void> updateLicence({
-    required String licenceKey,
-    String licenceInternalKey = licenceCheck,
-  }) {
-    final sanitizedLicenceKey = licenceKey.trim();
-    final sanitizedLicenceInternalKey = _sanitizeInternalKey(licenceInternalKey);
-
-    if (sanitizedLicenceKey.isEmpty) {
-      throw ArgumentError('licenceKey é obrigatório.');
-    }
-
-    return _configureLicence(
-      licenceKey: sanitizedLicenceKey,
-      licenceInternalKey: sanitizedLicenceInternalKey,
-    );
   }
 
   /// Send deeplink to Stone payment app
@@ -138,9 +86,6 @@ final class Deeplink {
 
   /// Executa uma operação no nativo. Nunca lança: em caso de erro chama
   /// [IDeepLinkHandler.onError] e retorna `false`.
-  ///
-  /// O nativo valida a licença antes de abrir o app da Stone; se ela for
-  /// inválida, responde PlatformException(code: 'LICENCE_ERROR').
   Future<bool> _invokeOperation(String method, Map<String, dynamic> arguments) async {
     try {
       await channel.invokeMethod(method, arguments);

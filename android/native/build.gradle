@@ -10,8 +10,6 @@ buildscript {
         }
 
         flutterSdk = System.env.FLUTTER_SDK ?: localProps.getProperty("flutter.sdk") ?: ""
-        licenceKey = System.env.LICENCE_KEY ?: localProps.getProperty("licenceKey") ?: ""
-        licenceInternalKey = System.env.LICENCE_INTERNAL_KEY ?: localProps.getProperty("licenceInternalKey") ?: ""
     }
 
     repositories {
@@ -51,13 +49,7 @@ android {
     defaultConfig {
         minSdk = 24
 
-        buildConfigField "String", "LICENCE_KEY", "\"${licenceKey}\""
-        buildConfigField "String", "LICENCE_INTERNAL_KEY", "\"${licenceInternalKey}\""
         consumerProguardFiles "consumer-rules.pro"
-    }
-
-    buildFeatures {
-        buildConfig = true
     }
 
     compileOptions {
@@ -87,7 +79,6 @@ android {
 }
 
 dependencies {
-    implementation("androidx.security:security-crypto:1.1.0-alpha03")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.22")
     compileOnly(files(flutterJar))

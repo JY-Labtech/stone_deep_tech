@@ -1,11 +1,6 @@
-import 'dart:convert';
-
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stone_deep_tech/stone_deep_tech.dart';
-
-/// Chave fictícia usada só nos testes.
-const _testLicenceKey = 'test-licence-key-0000';
 
 class _RecordingHandler implements IDeepLinkHandler {
   final List<String> errors = [];
@@ -37,7 +32,7 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
       calls.add(call);
-      if (call.method == 'configureLicence') return true;
+      if (call.method == 'initDeeplink') return true;
       if (operationError != null) throw operationError!;
       return true;
     });
@@ -47,11 +42,6 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, null);
   });
-
-  Map<dynamic, dynamic> lastConfigureArgs() {
-    final call = calls.lastWhere((c) => c.method == 'configureLicence');
-    return call.arguments as Map<dynamic, dynamic>;
-  }
 
   final operations = <String, Future<bool> Function(Deeplink)>{
     'sendDeeplink': (d) => d.sendDeeplink(
@@ -64,109 +54,42 @@ void main() {
         ),
   };
 
-  group('licenceCheck', () {
-    test('decodifica para a URL do servidor oficial da JY Labtech', () {
-      final url = utf8.decode(base64.decode(licenceCheck));
-      expect(url, 'https://licence-server.invalid/pos-payments/licence/check');
-      final uri = Uri.parse(url);
-      expect(uri.scheme, 'https');
-      expect(uri.host, 'licence-server.invalid');
-      expect(uri.path, startsWith('/pos-payments/'));
+  group('initDeeplink', () {
+    test('avisa o nativo (initDeeplink, sem argumentos) para entregar respostas pendentes', () async {
+      StoneDeepTech(channel).initDeeplink(handler: _RecordingHandler());
+      await pumpEventQueue();
+
+      final init = calls.singleWhere((c) => c.method == 'initDeeplink');
+      expect(init.arguments, isNull);
+    });
+
+    test('é o único método chamado no nativo ao inicializar', () async {
+      StoneDeepTech(channel).initDeeplink(handler: _RecordingHandler());
+      await pumpEventQueue();
+      expect(calls.map((c) => c.method), ['initDeeplink']);
     });
   });
 
-  group('configureLicence', () {
-    test('initDeeplink envia licenceKey e licenceInternalKey padrão do core quando omitido', () async {
-      StoneDeepTech(channel).initDeeplink(handler: _RecordingHandler(), licenceKey: ' $_testLicenceKey ');
-      await pumpEventQueue();
-
-      final args = lastConfigureArgs();
-      expect(args['licenceKey'], _testLicenceKey);
-      expect(args['licenceInternalKey'], licenceCheck);
-    });
-
-    test('initDeeplink envia o licenceInternalKey informado', () async {
-      StoneDeepTech(channel).initDeeplink(
-        handler: _RecordingHandler(),
-        licenceKey: _testLicenceKey,
-        licenceInternalKey: 'https://licence-server.invalid/pos-payments/licence/check',
-      );
-      await pumpEventQueue();
-
-      expect(
-        lastConfigureArgs()['licenceInternalKey'],
-        'https://licence-server.invalid/pos-payments/licence/check',
-      );
-    });
-
-    test('licenceInternalKey vazio usa a constante do core', () async {
-      StoneDeepTech(channel).initDeeplink(
-        handler: _RecordingHandler(),
-        licenceKey: _testLicenceKey,
-        licenceInternalKey: '   ',
-      );
-      await pumpEventQueue();
-      expect(lastConfigureArgs()['licenceInternalKey'], licenceCheck);
-    });
-
-    test('updateLicence envia as chaves (internalKey padrão do core)', () async {
-      final deeplink = StoneDeepTech(channel).initDeeplink(
-        handler: _RecordingHandler(),
-        licenceKey: _testLicenceKey,
-      );
-      await deeplink.updateLicence(licenceKey: 'other-test-key');
-
-      final args = lastConfigureArgs();
-      expect(args['licenceKey'], 'other-test-key');
-      expect(args['licenceInternalKey'], licenceCheck);
-    });
-
-    test('licenceKey vazio é rejeitado', () {
-      expect(
-        () => StoneDeepTech(channel).initDeeplink(handler: _RecordingHandler(), licenceKey: '  '),
-        throwsArgumentError,
-      );
-    });
-  });
-
-  group('licença inválida', () {
-    for (final entry in operations.entries) {
-      test('${entry.key}: LICENCE_ERROR retorna false e chama onError (nunca sucesso)', () async {
-        final handler = _RecordingHandler();
-        final deeplink = StoneDeepTech(channel).initDeeplink(handler: handler, licenceKey: _testLicenceKey);
-        operationError = PlatformException(code: 'LICENCE_ERROR', message: 'Licença vencida');
-
-        final ok = await entry.value(deeplink);
-
-        expect(ok, isFalse);
-        expect(handler.sentCount, 0);
-        expect(handler.errors, hasLength(1));
-        expect(handler.errors.single, contains('LICENCE_ERROR'));
-        expect(handler.errors.single, contains('Licença vencida'));
-        expect(calls.map((c) => c.method), contains(entry.key));
-      });
-    }
-
-    test('LICENCE_NOT_CONFIGURED também é entregue como erro', () async {
-      final handler = _RecordingHandler();
-      final deeplink = StoneDeepTech(channel).initDeeplink(handler: handler, licenceKey: _testLicenceKey);
-      operationError = PlatformException(code: 'LICENCE_NOT_CONFIGURED', message: 'Chaves não configuradas');
-
-      expect(await operations['sendDeeplink']!(deeplink), isFalse);
-      expect(handler.sentCount, 0);
-      expect(handler.errors.single, contains('LICENCE_NOT_CONFIGURED'));
-    });
-  });
-
-  group('licença válida', () {
+  group('operações chamam o canal direto', () {
     for (final entry in operations.entries) {
       test('${entry.key}: sucesso retorna true e chama onDeeplinkSent', () async {
         final handler = _RecordingHandler();
-        final deeplink = StoneDeepTech(channel).initDeeplink(handler: handler, licenceKey: _testLicenceKey);
+        final deeplink = StoneDeepTech(channel).initDeeplink(handler: handler);
 
         expect(await entry.value(deeplink), isTrue);
+        expect(calls.where((c) => c.method == entry.key), hasLength(1));
         expect(handler.sentCount, 1);
         expect(handler.errors, isEmpty);
+      });
+
+      test('${entry.key}: erro do nativo retorna false e chama onError (nunca sucesso)', () async {
+        final handler = _RecordingHandler();
+        final deeplink = StoneDeepTech(channel).initDeeplink(handler: handler);
+        operationError = PlatformException(code: 'ERROR', message: 'sem app da Stone');
+
+        expect(await entry.value(deeplink), isFalse);
+        expect(handler.sentCount, 0);
+        expect(handler.errors.single, allOf(contains('ERROR'), contains('sem app da Stone')));
       });
     }
   });

@@ -2,15 +2,9 @@ package br.com.jylabtech.stone_deep_tech
 
 import android.content.Context
 import android.content.Intent
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import androidx.annotation.NonNull
 import androidx.annotation.VisibleForTesting
-import br.com.jylabtech.stone_deep_tech.BuildConfig
-import br.com.jylabtech.stone_deep_tech.licence.CheckLicenceTech
-import br.com.jylabtech.stone_deep_tech.licence.LicenceConfig
-import br.com.jylabtech.stone_deep_tech.licence.LicenceResult
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
@@ -19,8 +13,6 @@ import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
 import io.flutter.plugin.common.PluginRegistry
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
 
 class StoneDeepTechNativePlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     private val CHANNEL_NAME = "stone_deep_tech"
@@ -29,30 +21,6 @@ class StoneDeepTechNativePlugin : FlutterPlugin, MethodCallHandler, ActivityAwar
     private var channel: MethodChannel? = null
     private var context: Context? = null
     private var activityBinding: ActivityPluginBinding? = null
-    private var licenceTech: CheckLicenceTech? = null
-    private var licenceKey: String? = null
-    private var licenceInternalKey: String? = null
-
-    /** Validação da licença (bloqueante; roda em background). Substituível em testes. */
-    @VisibleForTesting
-    internal var licenceValidator: ((String, String) -> LicenceResult?)? = null
-
-    // Uma thread só: validações em sequência reaproveitam o cache salvo pela anterior.
-    // Criada sob demanda e encerrada em onDetachedFromEngine.
-    private var licenceExecutor: ExecutorService? = null
-
-    private fun licenceExecutor(): ExecutorService =
-        licenceExecutor ?: Executors.newSingleThreadExecutor().also { licenceExecutor = it }
-
-    private val mainHandler: Handler by lazy { Handler(Looper.getMainLooper()) }
-
-    /** Executa a validação fora da main thread. Substituível em testes. */
-    @VisibleForTesting
-    internal var backgroundExecutor: (Runnable) -> Unit = { task -> licenceExecutor().execute(task) }
-
-    /** Entrega o resultado na main thread. Substituível em testes. */
-    @VisibleForTesting
-    internal var mainThreadExecutor: (Runnable) -> Unit = { task -> mainHandler.post(task) }
 
     /** Abre o app da Stone. Substituível em testes. */
     @VisibleForTesting
@@ -79,13 +47,14 @@ class StoneDeepTechNativePlugin : FlutterPlugin, MethodCallHandler, ActivityAwar
     private val newIntentListener = PluginRegistry.NewIntentListener { intent -> handleIntent(intent) }
 
     companion object {
-        private const val LICENCE_ERROR_MESSAGE = "Sua licença não foi ativada."
-
         /** Extra que marca o intent de resposta da Stone já entregue ao Dart. */
         internal const val EXTRA_HANDLED = "br.com.jylabtech.stone_deep_tech.RESPONSE_HANDLED"
 
-        /** Métodos que executam operações de negócio e exigem licença válida. */
-        internal val GATED_METHODS = setOf("sendDeeplink", "sendCancel", "sendPrint", "sendReprint")
+        /** Chamado pelo Dart logo depois de registrar o handler: entrega as respostas pendentes. */
+        internal const val INIT_METHOD = "initDeeplink"
+
+        /** Métodos que abrem o app da Stone. */
+        internal val OPERATION_METHODS = setOf("sendDeeplink", "sendCancel", "sendPrint", "sendReprint")
     }
 
     override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
@@ -93,34 +62,17 @@ class StoneDeepTechNativePlugin : FlutterPlugin, MethodCallHandler, ActivityAwar
             it.setMethodCallHandler(this)
         }
         context = flutterPluginBinding.applicationContext
-        context?.let {
-            licenceTech = CheckLicenceTech(it)
-            returnSchemes = SharedPrefsReturnSchemeStore(it)
-        }
-        initialiseLicenceDefaults()
+        context?.let { returnSchemes = SharedPrefsReturnSchemeStore(it) }
     }
 
     override fun onMethodCall(@NonNull call: MethodCall, @NonNull rawResult: Result) {
         // Toda resposta passa por SafeResult: no máximo uma resposta por chamada.
         val result = SafeResult(rawResult, call.method)
 
-        if (call.method == "configureLicence") {
-            handleConfigureLicence(call, result)
-            return
-        }
-
-        if (call.method !in GATED_METHODS) {
-            result.notImplemented()
-            return
-        }
-
-        if (!ensureLicenceConfigured(result)) {
-            return
-        }
-
-        // Toda operação valida a licença antes de abrir o app da Stone (cache válido ou servidor).
-        withValidLicence(result) {
-            executeOperation(call, result)
+        when (call.method) {
+            INIT_METHOD -> handleInit(result)
+            in OPERATION_METHODS -> executeOperation(call, result)
+            else -> result.notImplemented()
         }
     }
 
@@ -138,76 +90,12 @@ class StoneDeepTechNativePlugin : FlutterPlugin, MethodCallHandler, ActivityAwar
     }
 
     /**
-     * Valida a licença em background e, na main thread, executa [onValid] somente se a licença
-     * for válida e ativa. Caso contrário responde LICENCE_ERROR e não abre o app da Stone.
+     * O Dart registra o handler de respostas e chama `initDeeplink`: entrega as respostas da Stone
+     * que chegaram antes (app aberto a frio pelo deeplink de retorno).
      */
-    private fun withValidLicence(result: Result, onValid: () -> Unit) {
-        val configuredLicenceKey = licenceKey?.trim().orEmpty()
-        val configuredLicenceInternalKey = licenceInternalKey?.trim().orEmpty()
-        val validator = licenceValidator ?: licenceTech?.let { tech ->
-            { key: String, internalKey: String -> tech.validateLicence(key, internalKey) }
-        }
-
-        try {
-            backgroundExecutor(Runnable {
-                val licenceResult: LicenceResult? = try {
-                    validator?.invoke(configuredLicenceKey, configuredLicenceInternalKey)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Erro ao validar licença", e)
-                    null
-                }
-                val isValid = licenceResult?.result == 0
-
-                mainThreadExecutor(Runnable {
-                    if (isValid) {
-                        onValid()
-                    } else {
-                        val message = licenceResult?.errorMessage?.takeIf { it.isNotBlank() }
-                            ?: LICENCE_ERROR_MESSAGE
-                        Log.e(TAG, "Erro na validação de licença: $message")
-                        result.error("LICENCE_ERROR", message, null)
-                    }
-                })
-            })
-        } catch (e: Exception) {
-            // Ex.: executor rejeitou a tarefa. Nunca deixa a Future do Dart sem resposta.
-            Log.e(TAG, "Não foi possível agendar a validação de licença", e)
-            result.error("LICENCE_ERROR", LICENCE_ERROR_MESSAGE, null)
-        }
-    }
-
-    private fun handleConfigureLicence(call: MethodCall, result: Result) {
-        val licenceKeyArgument = (call.argument<Any>("licenceKey") as? String)?.trim() ?: ""
-        val licenceInternalKeyArgument = (call.argument<Any>("licenceInternalKey") as? String)?.trim() ?: ""
-
-        if (licenceKeyArgument.isEmpty()) {
-            result.error("INVALID_ARGUMENT", "licenceKey é obrigatório", null)
-            return
-        }
-
-        licenceKey = licenceKeyArgument
-        // Opcional: vazio usa o servidor oficial. Valores fora do servidor oficial são ignorados
-        // na validação (LicenceConfig.resolveLicenceUrl).
-        licenceInternalKey = licenceInternalKeyArgument.ifEmpty { LicenceConfig.LICENCE_CHECK_URL }
-
-        Log.i(TAG, "Chaves de licença configuradas via Dart")
+    private fun handleInit(result: Result) {
         result.success(true)
-
-        // O Dart registra o handler de respostas antes de configurar a licença: entrega as pendentes.
         responseDispatcher.flushPending()
-    }
-
-    private fun ensureLicenceConfigured(result: Result): Boolean {
-        val hasLicence = !licenceKey.isNullOrBlank()
-        if (!hasLicence) {
-            Log.e(TAG, "Licença não configurada. Chame configureLicence antes de usar o plugin.")
-            result.error(
-                "LICENCE_NOT_CONFIGURED",
-                "Chaves de licença não configuradas. Chame configureLicence antes de utilizar o plugin.",
-                null
-            )
-        }
-        return hasLicence
     }
 
     private fun handleIntent(intent: Intent): Boolean = handleIntent(
@@ -254,25 +142,7 @@ class StoneDeepTechNativePlugin : FlutterPlugin, MethodCallHandler, ActivityAwar
         channel?.setMethodCallHandler(null)
         channel = null
         context = null
-        licenceTech = null
-        licenceKey = null
-        licenceInternalKey = null
         responseDispatcher.clear()
-        licenceExecutor?.shutdown()
-        licenceExecutor = null
-    }
-
-    private fun initialiseLicenceDefaults() {
-        val defaultLicenceKey = BuildConfig.LICENCE_KEY
-        val defaultLicenceInternalKey = BuildConfig.LICENCE_INTERNAL_KEY
-
-        if (!defaultLicenceKey.isNullOrBlank()) {
-            licenceKey = defaultLicenceKey
-            licenceInternalKey = defaultLicenceInternalKey.ifBlank { LicenceConfig.LICENCE_CHECK_URL }
-            Log.i(TAG, "Chaves de licença carregadas do BuildConfig")
-        } else {
-            Log.w(TAG, "Chaves de licença do BuildConfig estão vazias. Aguardando configuração via Dart.")
-        }
     }
 
     private fun attachActivity(binding: ActivityPluginBinding, handleLaunchIntent: Boolean) {

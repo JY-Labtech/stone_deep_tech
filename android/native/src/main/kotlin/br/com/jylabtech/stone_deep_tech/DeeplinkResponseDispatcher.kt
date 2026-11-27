@@ -8,7 +8,7 @@ import io.flutter.plugin.common.MethodChannel
  *
  * Se o Dart ainda não registrou o handler (app aberto a frio pelo deeplink de retorno, antes de
  * `initDeeplink`), a chamada volta como `notImplemented` e a resposta fica pendente até [flushPending],
- * chamado quando o Dart configura a licença (logo depois de registrar o handler). Usar só na main thread.
+ * chamado quando o Dart chama `initDeeplink` (logo depois de registrar o handler). Usar só na main thread.
  */
 internal class DeeplinkResponseDispatcher(
     private val sender: (method: String, arguments: Any?, callback: MethodChannel.Result) -> Unit
